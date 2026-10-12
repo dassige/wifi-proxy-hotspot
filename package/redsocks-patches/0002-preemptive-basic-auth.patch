@@ -1,0 +1,21 @@
+--- a/http-connect.c
++++ b/http-connect.c
+@@ -242,6 +242,18 @@
+ 					"CONNECT", uri, auth->last_auth_count, cnounce); // method, path, nc, cnounce
+ 			auth_scheme = "Digest";
+ 		}
++	} else if (client->instance->config.login != NULL && client->instance->config.password != NULL) {
++		/* No challenge seen yet for this instance: send Basic auth
++		 * proactively instead of waiting for a 407 round trip, since
++		 * Basic is what the overwhelming majority of HTTP proxies use.
++		 * If this proxy actually requires Digest, this first attempt
++		 * gets rejected with a 407 and the challenge/retry path above
++		 * still handles it correctly on the next attempt -- same
++		 * correctness as before, just no longer paid on every single
++		 * connection for the common Basic case.
++		 */
++		auth_string = basic_authentication_encode(client->instance->config.login, client->instance->config.password);
++		auth_scheme = "Basic";
+ 	}
+ 
+ 	// TODO: do accurate evbuffer_expand() while cleaning up http-auth

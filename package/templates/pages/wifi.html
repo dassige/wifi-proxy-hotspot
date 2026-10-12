@@ -1,0 +1,80 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-wifi">
+<h2>Wi-Fi Access Point {{ help_btn('help-wifi') }}</h2>
+{{ help_dialog('help-wifi', HELP_WIFI) }}
+<p class="hint">
+Status:
+<span class="status-badge {{ 'status-online' if hotspot_enabled else 'status-offline' }}">{{ 'Enabled' if hotspot_enabled else 'Disabled' }}</span>
+{{ 'The hotspot is broadcasting and accepting devices.' if hotspot_enabled else 'The hotspot is off and will not come back on its own, including after a reboot, until re-enabled here.' }}
+</p>
+<p class="hint">Band: <b>{{ wifi_band }}</b>{% if wifi_live_channel %} (live: channel {{ wifi_live_channel }}){% endif %}. One radio broadcasts one band at a time.</p>
+<div class="wifi-qr">
+  <button type="button" id="wifi-qr-toggle">Show join QR code</button>
+  <span class="hint">Point a phone's camera at it to join without typing the password. It contains the password, so hide it again before others can see the screen.</span>
+  <div id="wifi-qr-box" hidden></div>
+</div>
+<script>
+(function () {
+  var btn = document.getElementById("wifi-qr-toggle");
+  var box = document.getElementById("wifi-qr-box");
+  btn.addEventListener("click", function () {
+    if (!box.hidden) {
+      box.hidden = true;
+      box.textContent = "";
+      btn.textContent = "Show join QR code";
+      return;
+    }
+    btn.disabled = true;
+    fetch("/api/wifi-qr", {cache: "no-store"}).then(function (r) {
+      return r.text().then(function (body) { return {ok: r.ok, type: r.headers.get("Content-Type") || "", body: body}; });
+    }).then(function (res) {
+      btn.disabled = false;
+      box.textContent = "";
+      if (res.ok && res.type.indexOf("image/svg+xml") === 0) {
+        var img = document.createElement("img");
+        img.alt = "QR code to join the hotspot";
+        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(res.body);
+        box.appendChild(img);
+      } else {
+        var p = document.createElement("p");
+        p.className = "hint status-warn";
+        p.textContent = res.body;
+        box.appendChild(p);
+      }
+      box.hidden = false;
+      btn.textContent = "Hide QR code";
+    }).catch(function () { btn.disabled = false; });
+  });
+})();
+</script>
+<form method="post" action="/wifi/radio" class="flex-row radio-form">
+  <label>Band &amp; channel
+    <select name="choice">
+      {% for key, (band, channel, label) in wifi_radio_choices.items() %}
+      <option value="{{ key }}" {{ 'selected' if key == wifi_radio else '' }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" onclick="return confirm('Move the hotspot to this band/channel? Every device drops for a few seconds and reconnects. On 5 GHz, devices that only support 2.4 GHz (some older phones, smart plugs, many TVs) can no longer see the hotspot. If it fails to start, it goes back to the current setting by itself.')">Apply</button>
+</form>
+<div class="button-row">
+  {% if hotspot_enabled %}
+  <form method="post" action="/wifi/enabled" class="inline-form">
+    <input type="hidden" name="enabled" value="0">
+    <button type="submit" onclick="return confirm('Disable the hotspot? All connected devices will be disconnected immediately, and it will stay off, even across a reboot, until you re-enable it here.')">Disable Hotspot</button>
+  </form>
+  {% else %}
+  <form method="post" action="/wifi/enabled" class="inline-form">
+    <input type="hidden" name="enabled" value="1">
+    <button type="submit">Enable Hotspot</button>
+  </form>
+  {% endif %}
+</div>
+<form method="post" action="/wifi">
+  <label>SSID <input name="ssid" value="{{ ssid }}" required></label>
+  <label>Passphrase <input name="passphrase" type="password" placeholder="leave blank to keep current"></label>
+  <div class="button-row">
+    <button type="submit">Save Wi-Fi</button>
+    <button type="submit" formaction="/wifi/restart" {{ 'disabled' if not hotspot_enabled else '' }} onclick="return confirm('Restart the Wi-Fi access point? Connected devices will briefly drop and must rejoin.')">Restart Wi-Fi</button>
+  </div>
+</form>
+</section>

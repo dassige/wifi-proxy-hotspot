@@ -1,0 +1,109 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-devices">
+<h2>Devices {{ help_btn('help-devices') }}</h2>
+{{ help_dialog('help-devices', HELP_DEVICES) }}
+<form method="get" action="/" class="inline-form">
+  <button type="submit">Refresh</button>
+</form>
+{% if devices %}
+<table id="devices-table" class="stack">
+  <thead><tr><th>Device</th><th>Address</th><th>Status</th><th>Signal</th><th>Traffic</th><th>Routing</th><th>Blocked</th></tr></thead>
+  <tbody>
+  {% for d in devices %}
+  <tr data-ip="{{ d.ip }}" data-mac="{{ d.mac }}" {% if d.blocked %}class="device-blocked"{% elif not d.online %}class="device-offline"{% endif %}>
+    <td data-label="Device">
+      <div class="device-name">
+        <b>{{ d.nickname or d.hostname or '—' }}</b>
+        {% if d.nickname and d.hostname %}<span class="device-host">{{ d.hostname }}</span>{% endif %}
+        <details class="rename">
+          <summary>{{ 'rename' if d.nickname else 'name it' }}</summary>
+          <form method="post" action="/device/rename" class="rename-form">
+            <input type="hidden" name="mac" value="{{ d.mac }}">
+            <input name="nickname" value="{{ d.nickname }}" maxlength="{{ nickname_max }}" placeholder="e.g. Living-room TV" aria-label="Nickname">
+            <button type="submit">Save</button>
+          </form>
+        </details>
+        {% if d.ip %}<a href="#" class="lookup-link" data-ip="{{ d.ip }}">lookups</a>{% endif %}
+      </div>
+    </td>
+    <td data-label="Address"><div class="stacked-cell"><span>{{ d.ip or '—' }}</span><span class="cell-sub">{{ d.mac }}</span></div></td>
+    <td data-label="Status"><div class="stacked-cell">
+      {% if d.blocked %}<span class="status-badge status-blocked">Blocked</span>
+      {% elif d.online %}<span class="status-badge status-online">Online</span>
+      {% else %}<span class="status-badge status-offline">Offline</span>{% endif %}
+      {% if d.connected_time %}<span class="cell-sub">for {{ d.connected_time }}</span>{% endif %}
+    </div></td>
+    <td data-label="Signal" class="signal-cell">
+      {% if d.signal_dbm is not none %}
+      <span class="signal"><span class="signal-bars signal-{{ d.signal_bars }}"><i></i><i></i><i></i><i></i></span><span class="signal-text">{{ d.signal_dbm }} dBm · {{ d.signal_label }}</span></span>
+      {% else %}—{% endif %}
+    </td>
+    <td data-label="Traffic"><div class="stacked-cell"><span>↑ <span class="traffic-sent">{{ d.sent }}</span></span><span>↓ <span class="traffic-received">{{ d.received }}</span></span></div></td>
+    <td data-label="Routing">
+      {% set policy = device_policies.get(d.mac, '') %}
+      <form method="post" action="/device/policy" class="inline-form">
+        <input type="hidden" name="mac" value="{{ d.mac }}">
+        <select name="action" onchange="this.form.submit()" aria-label="Routing for this device"{% if policy %} class="policy-set"{% endif %}>
+          <option value="" {{ 'selected' if not policy else '' }}>Follow the rules</option>
+          <option value="direct" {{ 'selected' if policy == 'direct' else '' }}>Always direct</option>
+          {% for name, p in profiles.items() %}
+          <option value="{{ name }}" {{ 'selected' if policy == name else '' }}{% if not (p.enabled is not defined or p.enabled) and policy != name %} disabled{% endif %}>Always through {{ name }}{% if not (p.enabled is not defined or p.enabled) %} (disabled){% endif %}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </td>
+    <td data-label="Blocked">
+      <form method="post" class="inline-form">
+        <input type="hidden" name="mac" value="{{ d.mac }}">
+        <label class="toggle-switch">
+          <input type="checkbox" {{ 'checked' if d.blocked else '' }} onchange="var f=this.form; var ok=this.checked?confirm('Block this device from the hotspot? The Wi-Fi access point will briefly reconnect, dropping every other connected device too.'):confirm('Unblock this device? The Wi-Fi access point will briefly reconnect, dropping every other connected device too.'); if (ok) { f.action = this.checked ? '/device/block' : '/device/unblock'; f.submit(); } else { this.checked = !this.checked; }">
+          <span class="toggle-slider"></span>
+        </label>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="hint">Signal and Traffic (↑ sent, ↓ received) update automatically every few seconds — no need to click Refresh for those. A device stays listed (as Offline) after it disconnects, so it can still be found and unblocked later.</p>
+<script>
+(function () {
+  function formatBytes(n) {
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + units[i];
+  }
+  function poll() {
+    fetch("/api/traffic").then(function (r) { return r.json(); }).then(function (data) {
+      document.querySelectorAll("#devices-table tr[data-ip]").forEach(function (row) {
+        var ip = row.getAttribute("data-ip");
+        var counts = data[ip];
+        if (!counts) { return; }
+        row.querySelector(".traffic-sent").textContent = formatBytes(counts.up);
+        row.querySelector(".traffic-received").textContent = formatBytes(counts.down);
+      });
+    }).catch(function () {});
+    fetch("/api/signal").then(function (r) { return r.json(); }).then(function (data) {
+      document.querySelectorAll("#devices-table tr[data-mac]").forEach(function (row) {
+        var s = data[row.getAttribute("data-mac")];
+        var cell = row.querySelector(".signal-cell");
+        if (!s || s.dbm === null) { return; }
+        var bars = cell.querySelector(".signal-bars");
+        var text = cell.querySelector(".signal-text");
+        if (!bars || !text) {
+          cell.innerHTML = '<span class="signal"><span class="signal-bars"><i></i><i></i><i></i><i></i></span><span class="signal-text"></span></span>';
+          bars = cell.querySelector(".signal-bars");
+          text = cell.querySelector(".signal-text");
+        }
+        bars.className = "signal-bars signal-" + s.bars;
+        text.textContent = s.dbm + " dBm · " + s.label;
+      });
+    }).catch(function () {});
+  }
+  setInterval(poll, 5000);
+})();
+</script>
+{% else %}
+<p>No devices known yet — nothing has ever connected.</p>
+{% endif %}
+</section>

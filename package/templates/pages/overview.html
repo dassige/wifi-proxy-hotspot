@@ -1,0 +1,121 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-overview">
+<h2>Overview {{ help_btn('help-overview') }}</h2>
+{{ help_dialog('help-overview', HELP_OVERVIEW) }}
+<div id="health-banner" class="health-banner health-unknown">Loading health status…</div>
+<div class="button-row">
+  <button type="button" id="health-run">Run checks now</button>
+  <span class="check-result" id="health-run-result"></span>
+</div>
+<div id="health-groups"></div>
+<p class="hint" id="health-alerts"></p>
+<script>
+(function () {
+  var page = document.getElementById("page-overview");
+  var banner = document.getElementById("health-banner");
+  var groupsEl = document.getElementById("health-groups");
+  var alertsEl = document.getElementById("health-alerts");
+  var dot = document.getElementById("nav-health-dot");
+  var runBtn = document.getElementById("health-run");
+  var runResult = document.getElementById("health-run-result");
+  var GROUPS = ["Services", "Hotspot & DNS", "Firewall", "Proxies", "System"];
+  var WORDS = {ok: "All systems OK", warn: "Something needs a look", fail: "Something is broken", unknown: "Health status unknown"};
+  var lastGenerated = null;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    if (text !== undefined) { e.textContent = text; }
+    return e;
+  }
+  function dur(s) {
+    s = Math.max(0, Math.round(s));
+    if (s < 60) { return s + "s"; }
+    if (s < 3600) { return Math.floor(s / 60) + "m"; }
+    if (s < 86400) { return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m"; }
+    return Math.floor(s / 86400) + "d " + Math.floor((s % 86400) / 3600) + "h";
+  }
+  function stamp(t) {
+    var d = new Date(t * 1000);
+    return d.toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+  }
+  function render(d) {
+    var overall = d.state === "ok" ? d.overall : (d.state === "stale" ? "warn" : "unknown");
+    dot.className = "nav-dot dot-" + overall;
+    dot.title = WORDS[overall] || "";
+    if (!page.classList.contains("active")) { return; }
+    banner.className = "health-banner health-" + overall;
+    banner.textContent = "";
+    banner.appendChild(el("strong", "", WORDS[overall] || WORDS.unknown));
+    banner.appendChild(el("span", "health-banner-sub",
+      d.message || ("Last checked " + dur(d.now - d.generated) + " ago · checks run every 2 minutes")));
+    groupsEl.textContent = "";
+    GROUPS.forEach(function (g) {
+      var items = d.checks.filter(function (c) { return c.group === g; });
+      if (!items.length) { return; }
+      groupsEl.appendChild(el("h3", "health-group", g));
+      var grid = groupsEl.appendChild(el("div", "health-grid"));
+      items.forEach(function (c) {
+        var tile = grid.appendChild(el("div", "health-tile tile-" + c.status));
+        tile.appendChild(el("div", "tile-label", c.label));
+        tile.appendChild(el("div", "tile-detail", c.detail));
+        tile.appendChild(el("div", "tile-since", c.status === "off" ? "Profile disabled (Proxy Profiles)" :
+          (c.status === "ok" ? "OK" : c.status === "warn" ? "Warning" : "Failing") + " for " + dur(d.now - c.since)));
+      });
+    });
+    var a = d.alerts || {};
+    var text;
+    if (!a.enabled) {
+      text = "Email alerts are off. Set them up under System → Email Alerts to hear about problems without opening this page.";
+    } else {
+      text = "Email alerts are on." + (a.last_sent ? " Last sent " + stamp(a.last_sent) + "." : " None sent yet.");
+      if (a.pending) {
+        text += " " + a.pending + " alert(s) waiting to be sent" + (a.last_error ? " (last attempt: " + a.last_error + ")" : "") + ", retried every run.";
+      }
+    }
+    alertsEl.textContent = text;
+    alertsEl.className = "hint" + (a.pending ? " status-warn" : "");
+  }
+  function poll() {
+    return fetch("/api/health").then(function (r) { return r.json(); }).then(function (d) {
+      render(d);
+      return d;
+    }).catch(function () {});
+  }
+  runBtn.addEventListener("click", function () {
+    runBtn.disabled = true;
+    runResult.className = "check-result";
+    runResult.textContent = "Running…";
+    var before = lastGenerated;
+    fetch("/health/run", {method: "POST"}).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res.ok) { throw new Error(res.error); }
+      var tries = 0;
+      (function wait() {
+        poll().then(function (d) {
+          tries++;
+          if (d && d.generated && d.generated !== before) {
+            lastGenerated = d.generated;
+            runBtn.disabled = false;
+            runResult.textContent = "Done.";
+          } else if (tries < 30) {
+            setTimeout(wait, 3000);
+          } else {
+            runBtn.disabled = false;
+            runResult.textContent = "Still running; results will appear here when it finishes.";
+          }
+        });
+      })();
+    }).catch(function () {
+      runBtn.disabled = false;
+      runResult.className = "check-result status-badge status-blocked";
+      runResult.textContent = "Couldn't start the check.";
+    });
+  });
+  function tick() { poll().then(function (d) { if (d) { lastGenerated = d.generated; } }); }
+  document.querySelectorAll('.nav-item[data-page="overview"]').forEach(function (btn) {
+    btn.addEventListener("click", function () { setTimeout(tick, 0); });
+  });
+  setInterval(tick, 15000);
+  document.addEventListener("DOMContentLoaded", tick);
+})();
+</script>
+</section>

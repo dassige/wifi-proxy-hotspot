@@ -1,0 +1,230 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-pattern-rules">
+<h2>Default Behaviour {{ help_btn('help-default-behaviour') }}</h2>
+{{ help_dialog('help-default-behaviour', HELP_DEFAULT_BEHAVIOUR) }}
+<p class="hint">
+Applies to all hotspot traffic except the internal range above and any domain matched by a routing
+rule below, which always override this default.
+</p>
+<form method="post" action="/default-action/save">
+  <label>Send everything else
+    <select name="default_action">
+      {% for value, label in action_choices %}
+      <option value="{{ value }}" {{ 'selected' if default_action == value else '' }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Save default</button>
+</form>
+
+<h2>Routing Rules {{ help_btn('help-pattern-rules') }}</h2>
+{{ help_dialog('help-pattern-rules', HELP_PATTERN_RULES) }}
+<p class="hint">
+Evaluated in order, top to bottom, for every hostname a hotspot device looks up — the first
+matching rule wins and overrides the default above for that domain. Anything not matched falls
+back to the default. Only catches domains actually resolved through this hotspot’s own DNS.
+</p>
+<div class="rule-tester">
+  <label>Test a hostname <span class="hint">(see exactly which rule applies and where its traffic goes)</span>
+    <input id="rule-test-input" type="search" placeholder="e.g. raicinque1-push.cdn.netrw.it, or paste a URL" autocomplete="off" spellcheck="false" autocapitalize="off">
+  </label>
+  <div id="rule-test-result" class="rule-test-result" aria-live="polite"></div>
+</div>
+<script>
+(function () {
+  var input = document.getElementById("rule-test-input");
+  var out = document.getElementById("rule-test-result");
+  var timer = null, seq = 0;
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    if (text !== undefined) { e.textContent = text; }
+    return e;
+  }
+  function show(d) {
+    out.textContent = "";
+    if (!d.ok) { out.appendChild(el("p", "hint status-warn", d.error)); return; }
+    var head = out.appendChild(el("p", "rule-test-head"));
+    head.appendChild(el("b", "", d.host));
+    head.appendChild(document.createTextNode(" goes "));
+    head.appendChild(el("span", "route " + (d.proxied ? "route-proxy" : "route-direct"), d.proxied ? "through " + d.route : "Direct"));
+    head.appendChild(document.createTextNode(", decided by " + d.decided_by + "."));
+    var list = out.appendChild(el("ul", "hint"));
+    if (d.rule) {
+      list.appendChild(el("li", "", "Matched rule #" + d.rule.index + " (" + d.rule.label + ") through its pattern " + d.rule.pattern + "."));
+    } else {
+      list.appendChild(el("li", "", "No enabled rule matches, so the Default Behaviour applies."));
+    }
+    list.appendChild(el("li", "", "The lookup is " + d.dns + "."));
+    d.shadowed.forEach(function (r) {
+      list.appendChild(el("li", "", "Rule #" + r.index + " (" + r.label + ") also matches via " + r.pattern + ", but an earlier rule wins."));
+    });
+    d.disabled.forEach(function (r) {
+      list.appendChild(el("li", "", "Rule #" + r.index + " (" + r.label + ") would match via " + r.pattern + " but is switched off."));
+    });
+    d.notes.forEach(function (n) { list.appendChild(el("li", "", n)); });
+  }
+  input.addEventListener("input", function () {
+    clearTimeout(timer);
+    var q = input.value.trim();
+    if (!q) { out.textContent = ""; return; }
+    timer = setTimeout(function () {
+      var mine = ++seq;
+      fetch("/api/rule-test?host=" + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (d) {
+        if (mine === seq) { show(d); }
+      }).catch(function () {});
+    }, 300);
+  });
+})();
+</script>
+{% if pattern_rules %}
+<table class="stack">
+  <thead><tr><th>#</th><th>Patterns</th><th>Mode</th><th>Action</th><th>Description</th><th>Activity</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for r in pattern_rules %}
+  {# Both of a rule's rows share one stripe, so each rule reads as one block. #}
+  {% set stripe = loop.cycle('rule-odd', 'rule-even') %}
+  <tr class="{{ stripe }}{% if not r.enabled %} rule-disabled{% endif %}">
+    <td data-label="#">{{ loop.index }}</td>
+    <td data-label="Patterns"><div class="pattern-list">{% for p in rule_patterns(r) %}<span class="pattern-chip">{{ p }}</span>{% endfor %}</div>{% if pattern_problems[r.id] %}<span class="monitor-warn">{{ pattern_problems[r.id] }}</span>{% endif %}</td>
+    <td data-label="Mode">{{ r.mode }}</td>
+    <td data-label="Action">{{ 'Direct' if r.action == 'direct' else (r.action if r.action in profiles else (r.action ~ ' (missing)')) }}</td>
+    <td data-label="Description">{{ r.description or '—' }}</td>
+    {% set act = rule_activity[r.id] %}
+    <td data-label="Activity" class="rule-activity">
+      {% if not r.enabled %}—
+      {% elif act.lookups or act.connections %}<div>
+      <span>{{ act.lookups }} recent lookup{{ '' if act.lookups == 1 else 's' }}</span>
+      {% if act.connections is not none %}<span>{{ act.connections }} connection{{ '' if act.connections == 1 else 's' }} since the last rule change</span>{% endif %}
+      {% if act.last_name %}<span class="activity-last">last: {{ act.last_name }}, {{ ago(act.last) }}</span>{% endif %}
+      </div>{% else %}<span class="activity-none">No activity yet</span>{% endif %}
+    </td>
+    <td data-label="Enabled">
+      <form method="post" action="/pattern-rule/toggle" class="inline-form">
+        <input type="hidden" name="id" value="{{ r.id }}">
+        <label class="toggle-switch">
+          <input type="checkbox" {{ 'checked' if r.enabled else '' }} onchange="this.form.submit()">
+          <span class="toggle-slider"></span>
+        </label>
+      </form>
+    </td>
+  </tr>
+  <tr class="actions-row {{ stripe }}">
+    <td colspan="7">
+      <form method="post" action="/pattern-rule/move" class="inline-form">
+        <input type="hidden" name="id" value="{{ r.id }}">
+        <input type="hidden" name="direction" value="up">
+        <button type="submit" {{ 'disabled' if loop.first else '' }}>Move Up</button>
+      </form>
+      <form method="post" action="/pattern-rule/move" class="inline-form">
+        <input type="hidden" name="id" value="{{ r.id }}">
+        <input type="hidden" name="direction" value="down">
+        <button type="submit" {{ 'disabled' if loop.last else '' }}>Move Down</button>
+      </form>
+      <form method="get" action="/" class="inline-form">
+        <input type="hidden" name="edit_pattern" value="{{ r.id }}">
+        <button type="submit">Edit</button>
+      </form>
+      <form method="post" action="/pattern-rule/delete" class="inline-form">
+        <input type="hidden" name="id" value="{{ r.id }}">
+        <button type="submit" onclick="return confirm('Delete this pattern rule?')">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No pattern rules configured — all hotspot traffic follows the default behaviour above.</p>
+{% endif %}
+
+{% set form_rule = edit_pattern or prefill %}
+{% set form_mode = form_rule.mode if form_rule else 'wildcard' %}
+{% set form_action = form_rule.action if form_rule else 'direct' %}
+<details class="add-profile" {{ 'open' if form_rule else '' }}>
+  <summary>{{ 'Edit Routing Rule' if edit_pattern else 'Add Routing Rule' }}</summary>
+  {% if not edit_pattern %}
+  <label>Start from a preset
+    <select onchange="if (this.value) { location.href = '/?preset=' + encodeURIComponent(this.value); }">
+      <option value="">(none: start empty)</option>
+      {% for key, preset in rule_presets.items() %}
+      <option value="{{ key }}">{{ preset.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  {% if prefill %}<p class="hint">Pre-filled for you. Check the patterns and action, then Save Rule.</p>{% endif %}
+  {% if addition %}
+  {% if addition.already %}
+  <p class="hint">This rule already covers <b>{{ addition.host }}</b>, so nothing was added.</p>
+  {% else %}
+  <p class="hint">Added <code>{{ addition.pattern }}</code> for <b>{{ addition.host }}</b> at the end of the patterns. Check it, then Save Rule.</p>
+  {% endif %}
+  {% if addition.shadowed_by %}<p class="hint status-warn">An earlier rule, {{ addition.shadowed_by }}, also matches {{ addition.host }} and wins, so this rule won't apply to it until you move this rule above it.</p>{% endif %}
+  {% if addition.rule_off %}<p class="hint status-warn">This rule is switched off. Turn it on in the table above for it to apply.</p>{% endif %}
+  {% endif %}
+  <form method="post" action="/pattern-rule/save">
+    <input type="hidden" name="id" value="{{ edit_pattern.id if edit_pattern else '' }}">
+    <label>Patterns <span class="hint">(one per line; the rule matches if any of them does)</span>
+      <textarea name="patterns" rows="{{ form_pattern_rows }}" placeholder="e.g.&#10;*.netflix.com&#10;*.nflxvideo.net" required spellcheck="false" autocapitalize="off">{{ form_patterns }}</textarea>
+    </label>
+    <label>Mode
+      <select name="mode">
+        <option value="match" {{ 'selected' if form_mode == 'match' else '' }}>Exact match</option>
+        <option value="wildcard" {{ 'selected' if form_mode == 'wildcard' else '' }}>Wildcard (*, ?)</option>
+        <option value="regexp" {{ 'selected' if form_mode == 'regexp' else '' }}>Regular expression</option>
+      </select>
+    </label>
+    <label>Action
+      <select name="action">
+        {% for value, label in action_choices %}
+        <option value="{{ value }}" {{ 'selected' if form_action == value else '' }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Description <input name="description" value="{{ form_rule.description if form_rule else '' }}"></label>
+    <button type="submit">Save Rule</button>
+  </form>
+</details>
+
+<h2>Proxied Lookups {{ help_btn('help-resolve-via-proxy') }}</h2>
+{{ help_dialog('help-resolve-via-proxy', HELP_RESOLVE_VIA_PROXY) }}
+<form method="post" action="/resolve-via-proxy" class="flex-row">
+  <input type="hidden" name="enabled" value="{{ '0' if resolve_via_proxy else '1' }}">
+  <label class="toggle-switch">
+    <input type="checkbox" {{ 'checked' if resolve_via_proxy else '' }} onchange="this.form.submit()" aria-label="Look up proxied rules' hostnames through the proxy">
+    <span class="toggle-slider"></span>
+  </label>
+  <span>Look up hostnames matched by a proxied rule <b>through that proxy</b></span>
+</form>
+<p class="hint">
+Makes video CDNs hand out servers near the proxy instead of near this box, so a proxied stream
+doesn't cross the long link to the proxy twice. Falls back to ordinary DNS
+whenever the proxy isn't ready. Only hostnames matched by a rule are affected, not the default.
+</p>
+{% if resolve_via_proxy and doh_status %}
+<ul class="hint doh-status">
+  {% for name, s in doh_status.items() %}
+  <li><b>{{ name }}</b>: {{ s.warm }} tunnel{{ '' if s.warm == 1 else 's' }} ready · {{ s.ok }} lookup{{ '' if s.ok == 1 else 's' }} through the proxy{% if s.fallback %}, {{ s.fallback }} fell back to ordinary DNS{% endif %}{% if s.warm == 0 and s.last_error %} · last problem: {{ s.last_error }}{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Leak Guards {{ help_btn('help-leak-guards') }}</h2>
+{{ help_dialog('help-leak-guards', HELP_LEAK_GUARDS) }}
+<p class="hint">Stop devices quietly routing around the rules above. The internal network range is never affected.</p>
+{% for key, (label, explanation) in leak_guard_info.items() %}
+<form method="post" action="/leak-guard" class="leak-guard">
+  <input type="hidden" name="name" value="{{ key }}">
+  <input type="hidden" name="enabled" value="{{ '0' if leak_guards[key] else '1' }}">
+  <label class="toggle-switch">
+    <input type="checkbox" {{ 'checked' if leak_guards[key] else '' }} onchange="this.form.submit()" aria-label="{{ label }}">
+    <span class="toggle-slider"></span>
+  </label>
+  <div>
+    <b>{{ label }}</b>
+    <span class="hint">{{ explanation }}</span>
+    {% if leak_guards[key] and guard_counters.get(key) %}<span class="guard-count">{{ guard_counters[key] }} attempt{{ '' if guard_counters[key] == 1 else 's' }} caught since the rules last changed</span>{% endif %}
+  </div>
+</form>
+{% endfor %}
+</section>

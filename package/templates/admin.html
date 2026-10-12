@@ -1,0 +1,147 @@
+
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wi-Fi Proxy Hotspot Administration</title>
+<link rel="icon" href="{{ favicon }}">
+<script>
+// Theme before first paint: the saved choice (sidebar), else Auto = the device's own setting.
+(function () {
+  var pref = "auto";
+  try { pref = localStorage.getItem("wpxTheme") || "auto"; } catch (e) {}
+  var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function apply() {
+    var dark = pref === "dark" || (pref === "auto" && mq && mq.matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  }
+  apply();
+  if (mq && mq.addEventListener) { mq.addEventListener("change", apply); }
+  window.wpxSetTheme = function (p) { pref = p; try { localStorage.setItem("wpxTheme", p); } catch (e) {} apply(); };
+  window.wpxThemePref = function () { return pref; };
+})();
+</script>
+<style>{% include "admin.css" %}</style>
+{% from "macros.html" import help_btn, help_dialog %}
+
+<div class="card">
+<nav class="sidebar">
+  <button type="button" class="nav-item" data-page="overview">Overview <span class="nav-dot" id="nav-health-dot"></span></button>
+  <button type="button" class="nav-item" data-page="proxy-profiles">Proxy Profiles</button>
+  <button type="button" class="nav-item" data-page="wifi">Wi-Fi Access Point</button>
+  <button type="button" class="nav-item" data-page="network">Internal Network</button>
+  <button type="button" class="nav-item" data-page="pattern-rules">Routing Rules</button>
+  <button type="button" class="nav-item" data-page="devices">Devices</button>
+  <button type="button" class="nav-item" data-page="lookups">DNS Lookups</button>
+  <button type="button" class="nav-item" data-page="backup-restore">Backup &amp; Restore</button>
+  <button type="button" class="nav-item" data-page="system">System</button>
+  <button type="button" class="nav-item" data-page="help">Help</button>
+  <label class="theme-picker">Theme
+    <select id="theme-select" onchange="wpxSetTheme(this.value)">
+      <option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
+    </select>
+  </label>
+</nav>
+<div class="content">
+<h1>Wi-Fi Proxy Hotspot Administration</h1>
+<p class="subtitle">
+This gateway sits between devices on its Wi-Fi network and the internet. By default, every
+device that connects to the Wi-Fi access point below has its traffic
+{{ 'sent direct, bypassing the proxy' if default_action == 'direct' else ('routed through the "' ~ default_action ~ '" proxy profile') }},
+except devices on the internal network ({{ bypass_cidr }}), which are always reached directly,
+and any domain matched by a routing rule, which overrides the default for just that domain.
+Use the menu to change the upstream proxy, the Wi-Fi network devices connect to, the
+default behaviour and its pattern-rule overrides, and to see which devices are currently connected.
+</p>
+
+{% if message %}
+<div class="msg msg-{{ message_kind }}" role="{{ 'alert' if message_kind == 'error' else 'status' }}">
+  <span>{{ message }}</span>
+  <button type="button" class="msg-close" onclick="this.parentNode.remove()" aria-label="Dismiss">×</button>
+</div>
+{% endif %}
+
+{% include "pages/overview.html" %}
+
+{% include "pages/proxy-profiles.html" %}
+
+{% include "pages/wifi.html" %}
+
+{% include "pages/network.html" %}
+
+{% include "pages/pattern-rules.html" %}
+
+{% include "pages/devices.html" %}
+
+{% include "pages/lookups.html" %}
+
+{% include "pages/backup-restore.html" %}
+
+{% include "pages/system.html" %}
+
+{% include "pages/help.html" %}
+
+</div>
+</div>
+<script>
+(function () {
+  var pages = ["overview", "proxy-profiles", "wifi", "network", "pattern-rules", "devices", "lookups", "backup-restore", "system", "help"];
+  function showPage(id) {
+    if (pages.indexOf(id) === -1) { id = pages[0]; }
+    document.querySelectorAll(".page").forEach(function (el) {
+      el.classList.toggle("active", el.id === "page-" + id);
+    });
+    var nav = document.querySelector(".sidebar");
+    document.querySelectorAll(".nav-item").forEach(function (btn) {
+      var active = btn.getAttribute("data-page") === id;
+      btn.classList.toggle("active", active);
+      // Phone layout: keep the selected tab visible in the sideways-scrolling strip.
+      if (active && nav.scrollWidth > nav.clientWidth) {
+        nav.scrollLeft = btn.offsetLeft - (nav.clientWidth - btn.offsetWidth) / 2;
+      }
+    });
+    try { localStorage.setItem("wpxAdminPage", id); } catch (e) {}
+  }
+  document.querySelectorAll(".nav-item").forEach(function (btn) {
+    btn.addEventListener("click", function () { showPage(btn.getAttribute("data-page")); });
+  });
+  var forced = "{{ force_page }}";
+  var stored = null;
+  try { stored = localStorage.getItem("wpxAdminPage"); } catch (e) {}
+  showPage(forced || stored || pages[0]);
+  // Edit links and DNS Lookups' "Add" open a form at the bottom of its page:
+  // bring it into view rather than leave it below the fold (e.g. on a phone).
+  var openForm = forced && document.querySelector("#page-" + forced + " details.add-profile[open]");
+  if (openForm) {
+    openForm.scrollIntoView({block: "start"});
+  } else {
+    // A toggle, Move Up/Down or Save reloads the panel; put the view back where
+    // it was, so the row just changed is still in front of you.
+    var saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem("wpxScroll") || "null"); sessionStorage.removeItem("wpxScroll"); } catch (e) {}
+    var shown = document.querySelector(".page.active");
+    if (saved && shown && saved.page === shown.id && Date.now() - saved.t < 60000) {
+      window.scrollTo(0, saved.y);
+    }
+  }
+  document.querySelectorAll("form").forEach(function (form) {
+    if ((form.getAttribute("method") || "").toLowerCase() !== "post") { return; }
+    form.addEventListener("submit", function () {
+      var page = form.closest(".page");
+      try { sessionStorage.setItem("wpxScroll", JSON.stringify({page: page ? page.id : "", y: window.scrollY, t: Date.now()})); } catch (e) {}
+    });
+  });
+  // onchange="this.form.submit()" skips submit events, so cover those too.
+  var nativeSubmit = HTMLFormElement.prototype.submit;
+  HTMLFormElement.prototype.submit = function () {
+    var page = this.closest(".page");
+    try { sessionStorage.setItem("wpxScroll", JSON.stringify({page: page ? page.id : "", y: window.scrollY, t: Date.now()})); } catch (e) {}
+    return nativeSubmit.call(this);
+  };
+  var themeSelect = document.getElementById("theme-select");
+  if (themeSelect && window.wpxThemePref) { themeSelect.value = window.wpxThemePref(); }
+  var toast = document.querySelector(".msg-info");
+  if (toast) {
+    setTimeout(function () { toast.classList.add("fading"); setTimeout(function () { toast.remove(); }, 450); }, 6000);
+  }
+})();
+</script>

@@ -1,0 +1,77 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-system">
+<h2>System {{ help_btn('help-system') }}</h2>
+{{ help_dialog('help-system', HELP_SYSTEM) }}
+<h3>Hardware</h3>
+<table>
+  <tr><th>Model</th><td>{{ hw.model }}</td></tr>
+  <tr><th>CPU</th><td>{{ hw.cpu_model }} ({{ hw.cpu_cores }} cores, {{ hw.architecture }})</td></tr>
+  {% if hw.cpu_temp %}<tr><th>CPU Temperature</th><td>{{ hw.cpu_temp }}</td></tr>{% endif %}
+  <tr><th>Memory</th><td>{{ hw.ram_total }}</td></tr>
+  <tr><th>Disk</th><td>{{ hw.disk_used }} used of {{ hw.disk_total }} ({{ hw.disk_free }} free)</td></tr>
+  <tr><th>Operating System</th><td>{{ hw.os_pretty_name }}</td></tr>
+  <tr><th>Kernel</th><td>{{ hw.kernel }}</td></tr>
+  <tr><th>Hostname</th><td>{{ hw.hostname }}</td></tr>
+  <tr><th>Uptime</th><td>{{ hw.uptime }}</td></tr>
+</table>
+<p class="hint">Restarts the whole box, not just the Wi-Fi radio. Everything comes back up on its own.</p>
+<div class="button-row">
+  <form method="post" action="/system/reboot">
+    <button type="submit" onclick="return confirm('Reboot the whole server? The admin panel and all hotspot traffic will be unreachable for about a minute while it restarts.')">Reboot Server</button>
+  </form>
+</div>
+
+<h2>Email Alerts {{ help_btn('help-alerts') }}</h2>
+{{ help_dialog('help-alerts', HELP_ALERTS) }}
+<p class="hint">
+Emails you when a health check on the Overview page starts failing, and again when it recovers,
+plus one-off notices (box restarted, under-voltage, a proxy's exit IP changing). Nothing
+here ever changes routing.
+</p>
+<form method="post" action="/alerts/save" id="alerts-form">
+  <label class="inline-check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if alerts.enabled else '' }}> Send email alerts</label>
+  <div class="form-grid">
+    <label>SMTP server <input name="smtp_host" value="{{ alerts.smtp_host }}" placeholder="e.g. smtp.gmail.com" autocomplete="off"></label>
+    <label>Port <input name="smtp_port" value="{{ alerts.smtp_port }}" inputmode="numeric"></label>
+    <label>Connection security
+      <select name="security">
+        <option value="starttls" {{ 'selected' if alerts.security == 'starttls' else '' }}>STARTTLS (usually port 587)</option>
+        <option value="ssl" {{ 'selected' if alerts.security == 'ssl' else '' }}>SSL/TLS (usually port 465)</option>
+        <option value="none" {{ 'selected' if alerts.security == 'none' else '' }}>None (local relay only)</option>
+      </select>
+    </label>
+    <label>Username <input name="username" value="{{ alerts.username }}" autocomplete="off"></label>
+    <label>Password
+      <input name="password" type="password" autocomplete="new-password" placeholder="{{ 'leave blank to keep current' if alerts_has_password else '(optional)' }}">
+    </label>
+    <label>From address <input name="sender" value="{{ alerts.sender }}" placeholder="defaults to the username"></label>
+  </div>
+  <label>Send alerts to <input name="recipients" value="{{ alerts.recipients }}" placeholder="you@example.com, other@example.com"></label>
+  <label class="inline-check"><input type="checkbox" name="notify_boot" value="1" {{ 'checked' if alerts.notify_boot else '' }}> Also email when the box restarts</label>
+  <div class="button-row">
+    <button type="submit">Save alert settings</button>
+    <button type="button" id="alerts-test">Send test email</button>
+    <span class="check-result" id="alerts-test-result"></span>
+  </div>
+</form>
+<script>
+(function () {
+  var btn = document.getElementById("alerts-test");
+  var out = document.getElementById("alerts-test-result");
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    out.className = "check-result";
+    out.textContent = "Sending…";
+    fetch("/alerts/test", {method: "POST", body: new FormData(document.getElementById("alerts-form"))})
+      .then(function (r) { return r.json(); }).then(function (d) {
+        btn.disabled = false;
+        out.className = "check-result status-badge " + (d.ok ? "status-online" : "status-blocked");
+        out.textContent = d.ok ? "Sent. Check your inbox (and spam folder)." : "Failed: " + d.error;
+      }).catch(function () {
+        btn.disabled = false;
+        out.className = "check-result status-badge status-blocked";
+        out.textContent = "Failed: request error";
+      });
+  });
+})();
+</script>
+</section>

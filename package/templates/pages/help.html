@@ -1,0 +1,73 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-help">
+<h2>Help {{ help_btn('help-help') }}</h2>
+{{ help_dialog('help-help', HELP_HELP) }}
+<p class="hint">
+The full admin &amp; user guide — architecture, day-to-day tasks on this panel, connecting a
+device, and troubleshooting — as a PDF, installed on this box alongside the panel itself.
+</p>
+<div class="button-row">
+  <a href="/help/guide.pdf" class="btn-link" target="_blank" rel="noopener">Open the Wi-Fi Proxy Hotspot Guide (PDF)</a>
+</div>
+<p class="hint">Running version {{ app_version }}, built {{ app_version_date }}.</p>
+
+<h3 class="about-heading">About</h3>
+<p>
+<b>Wi-Fi Proxy Hotspot</b>, by Gerry Dassi. Free and open-source software, released under the
+MIT License. Source code, installation instructions and issue tracker:
+<a href="https://github.com/dassige/wifi-proxy-hotspot" target="_blank" rel="noopener">github.com/dassige/wifi-proxy-hotspot</a>.
+</p>
+
+<h3 class="about-heading">Disclaimer</h3>
+<div class="disclaimer">
+<p>This software is provided <b>"as is"</b>, without warranty of any kind. It is a personal project
+shared in the hope that it is useful. It is <b>not regularly maintained</b>, and there is no
+guaranteed support, fixes or updates.</p>
+<p>You are responsible for how you use it: comply with the laws where you live, the policies of the
+network this box is connected to, and the terms of service of your proxy provider and of any service
+you reach through it (for example, geo-restricted streaming services). A proxy hides your address
+from the sites you visit, not from the proxy operator, who can see and log your traffic metadata.</p>
+</div>
+
+<h3 class="about-heading">Credits</h3>
+<p class="hint">This project is built on these open-source projects, each under its own license.</p>
+<table class="stack credits">
+  <thead><tr><th>Project</th><th>Used for</th><th>License</th></tr></thead>
+  <tbody>
+  <tr><td data-label="Project">redsocks</td><td data-label="Used for">Transparent TCP-to-proxy redirector (two small performance patches are applied, under the same license)</td><td data-label="License">Apache-2.0</td></tr>
+  <tr><td data-label="Project">NetworkManager</td><td data-label="Used for">Wi-Fi access point, DHCP and NAT (with dnsmasq)</td><td data-label="License">GPL-2.0+</td></tr>
+  <tr><td data-label="Project">iptables / ipset</td><td data-label="Used for">Routing and per-domain matching in the kernel firewall</td><td data-label="License">GPL-2.0</td></tr>
+  <tr><td data-label="Project">Flask</td><td data-label="Used for">This admin panel</td><td data-label="License">BSD-3-Clause</td></tr>
+  <tr><td data-label="Project">Gunicorn</td><td data-label="Used for">Web server for this panel</td><td data-label="License">MIT</td></tr>
+  <tr><td data-label="Project">dnspython</td><td data-label="Used for">DNS router (domain-based routing)</td><td data-label="License">ISC</td></tr>
+  <tr><td data-label="Project">python-qrcode</td><td data-label="Used for">Wi-Fi join QR code</td><td data-label="License">BSD-3-Clause</td></tr>
+  <tr><td data-label="Project">python-pam</td><td data-label="Used for">Login with the box's Linux accounts</td><td data-label="License">MIT</td></tr>
+  </tbody>
+</table>
+
+<h3 class="about-heading">License</h3>
+<details class="license">
+<summary>MIT License — show full text</summary>
+<pre class="license-text">MIT License
+
+Copyright (c) 2026 Gerry Dassi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</pre>
+</details>
+</section>

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# AI-assistant working files (kept locally, never published)
+.claude/
+CLAUDE.md
+
+# Secrets — never commit real deployment config
+*.env
+proxies.json
+pattern_rules.json
+devices.json
+alerts.json
+health_state.json
+
+# SSH keys and access config for deploy.sh — never commit these
+keys/
+
+# Private notes about a specific deployment (build logs, investigations)
+troubleshooting/
+docs/build_incident_*.py
+docs/incident_*.pdf

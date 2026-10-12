@@ -1,0 +1,60 @@
+--- a/base.h
++++ b/base.h
+@@ -3,6 +3,7 @@
+ 
+ int getdestaddr(int fd, const struct sockaddr_in *client, const struct sockaddr_in *bindaddr, struct sockaddr_in *destaddr);
+ int apply_tcp_keepalive(int fd);
++int apply_tcp_nodelay(int fd);
+ 
+ uint32_t redsocks_conn_max();
+ uint32_t connpres_idle_timeout();
+--- a/base.c
++++ b/base.c
+@@ -267,6 +267,23 @@
+ 	return 0;
+ }
+ 
++int apply_tcp_nodelay(int fd)
++{
++	// Disable Nagle's algorithm on relay sockets: without this, small
++	// handshake-sized writes (CONNECT line, TLS handshake fragments)
++	// sit waiting for either more data to coalesce or the peer's delayed
++	// ACK before they're actually sent, which is punishing on a
++	// high-latency link -- costing hundreds of ms per round trip on top
++	// of real network RTT.
++	int on = 1;
++	int error = setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
++	if (error) {
++		log_errno(LOG_WARNING, "setsockopt(%d, IPPROTO_TCP, TCP_NODELAY, &1, %zu)", fd, sizeof(on));
++		return -1;
++	}
++	return 0;
++}
++
+ uint32_t max_accept_backoff_ms()
+ {
+ 	return instance.max_accept_backoff_ms;
+--- a/redsocks.c
++++ b/redsocks.c
+@@ -1201,6 +1201,9 @@
+ 	if (apply_tcp_keepalive(client_fd))
+ 		goto fail;
+ 
++	if (apply_tcp_nodelay(client_fd))
++		goto fail;
++
+ 	// everything seems to be ok, let's allocate some memory
+ 	client = calloc(1, sizeof_client(self));
+ 	if (!client) {
+--- a/utils.c
++++ b/utils.c
+@@ -145,6 +145,9 @@
+ 	if (apply_tcp_keepalive(relay_fd))
+ 		goto fail;
+ 
++	if (apply_tcp_nodelay(relay_fd))
++		goto fail;
++
+ 	error = connect(relay_fd, (struct sockaddr*)addr, sizeof(*addr));
+ 	if (error && errno != EINPROGRESS) {
+ 		log_errno(LOG_NOTICE, "connect");

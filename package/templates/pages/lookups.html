@@ -1,0 +1,160 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-lookups">
+<h2>DNS Lookups {{ help_btn('help-lookups') }}</h2>
+{{ help_dialog('help-lookups', HELP_LOOKUPS) }}
+<p class="hint">
+Every hostname each device has looked up recently, and where its traffic goes right now. When a
+site or video doesn't work, try it on the device, then look here for the names it used that are
+still going Direct. <b>New rule</b> opens the rule form pre-filled, and <b>Add to rule</b> adds the name
+to a rule you already have.
+</p>
+<div class="lookup-filters">
+  <label>Device <select id="lookup-device"><option value="">All devices</option></select></label>
+  <label>Route <select id="lookup-route">
+    <option value="">Any route</option>
+    <option value="direct">Only going Direct</option>
+    <option value="proxy">Only going through a proxy</option>
+  </select></label>
+  <label>Hostname contains <input id="lookup-filter" type="search" placeholder="e.g. rai, akamai" autocomplete="off"></label>
+</div>
+<p class="hint" id="lookup-status">Loading…</p>
+<table id="lookups-table" class="stack">
+  <thead><tr><th>Last seen</th><th>Hostname</th><th>Lookups</th><th>Route now</th><th>Device</th><th></th></tr></thead>
+  <tbody></tbody>
+</table>
+<p class="hint">Updates automatically every few seconds while this page is open. Kept in memory on the
+box only (the most recent 300 names per device) and cleared whenever it restarts.</p>
+<script>
+(function () {
+  var page = document.getElementById("page-lookups");
+  var sel = document.getElementById("lookup-device");
+  var routeSel = document.getElementById("lookup-route");
+  var filt = document.getElementById("lookup-filter");
+  var tbody = document.querySelector("#lookups-table tbody");
+  var statusEl = document.getElementById("lookup-status");
+  var data = null, clientsKey = "", pendingDevice = null;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    if (text !== undefined) { e.textContent = text; }
+    return e;
+  }
+  function cell(label) { var td = el("td"); if (label) { td.setAttribute("data-label", label); } return td; }
+  function ago(s) {
+    s = Math.max(0, Math.round(s));
+    if (s < 60) { return s + "s ago"; }
+    if (s < 3600) { return Math.floor(s / 60) + "m ago"; }
+    if (s < 86400) { return Math.floor(s / 3600) + "h ago"; }
+    return Math.floor(s / 86400) + "d ago";
+  }
+  function syncDevices() {
+    var key = data.clients.map(function (c) { return c.ip + "=" + c.label; }).join("|");
+    var want = pendingDevice !== null ? pendingDevice : sel.value;
+    if (key !== clientsKey) {
+      clientsKey = key;
+      while (sel.options.length > 1) { sel.remove(1); }
+      data.clients.forEach(function (c) {
+        var opt = el("option", "", c.label);
+        opt.value = c.ip;
+        sel.appendChild(opt);
+      });
+    }
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === want) { sel.selectedIndex = i; pendingDevice = null; break; }
+    }
+  }
+  function ruleHref(e) {
+    if (e.rule_id) { return "/?edit_pattern=" + encodeURIComponent(e.rule_id); }
+    return "/?new_pattern=" + encodeURIComponent(e.suggest.pattern) +
+      "&new_mode=" + encodeURIComponent(e.suggest.mode) +
+      "&new_action=" + encodeURIComponent(e.suggest.action) +
+      "&new_desc=" + encodeURIComponent("Found in DNS lookups: " + e.name);
+  }
+  function render() {
+    if (!data) { return; }
+    syncDevices();
+    var dev = sel.value, route = routeSel.value, q = filt.value.trim().toLowerCase();
+    var rows = data.entries.filter(function (e) {
+      if (dev && e.ip !== dev) { return false; }
+      if (route === "direct" && e.proxied) { return false; }
+      if (route === "proxy" && !e.proxied) { return false; }
+      return !q || e.name.indexOf(q) !== -1;
+    });
+    tbody.textContent = "";
+    rows.slice(0, 300).forEach(function (e) {
+      var tr = el("tr"), td;
+      tr.appendChild(cell("Last seen")).textContent = ago(data.now - e.last);
+      td = tr.appendChild(cell("Hostname"));
+      var host = td.appendChild(el("div", "lookup-host"));
+      host.appendChild(el("span", "", e.name));
+      if (e.bypass.length && data.dns_guard) {
+        host.appendChild(el("span", "bypass-note", "Sent to " + e.bypass.join(", ") + ", answered by the hotspot instead (DNS leak guard)"));
+      } else if (e.bypass.length) {
+        host.appendChild(el("span", "bypass-warn", "Also asked " + e.bypass.join(", ") + " directly, which no rule can see"));
+      }
+      tr.appendChild(cell("Lookups")).textContent = e.count;
+      td = tr.appendChild(cell("Route now"));
+      var wrap = el("span", "route-wrap");
+      wrap.appendChild(el("span", "route " + (e.proxied ? "route-proxy" : "route-direct"), e.action));
+      wrap.appendChild(el("span", "route-via", e.via));
+      td.appendChild(wrap);
+      tr.appendChild(cell("Device")).textContent = e.device;
+      td = tr.appendChild(cell(""));
+      var acts = td.appendChild(el("div", "lookup-actions"));
+      var a = el("a", "btn-link btn-small", e.rule_id ? "Edit " + e.rule_label :"New rule: " + e.suggest.pattern);
+      a.href = ruleHref(e);
+      acts.appendChild(a);
+      var others = (data.rules || []).filter(function (r) { return r.id !== e.rule_id; });
+      if (others.length) {
+        var pick = acts.appendChild(el("select", "add-to-rule"));
+        pick.setAttribute("aria-label", "Add " + e.name + " to an existing rule");
+        pick.appendChild(el("option", "", "Add to rule…")).value = "";
+        others.forEach(function (r) { pick.appendChild(el("option", "", r.label)).value = r.id; });
+        pick.addEventListener("change", function () {
+          if (pick.value) {
+            location.href = "/?edit_pattern=" + encodeURIComponent(pick.value) + "&add_host=" + encodeURIComponent(e.name);
+          }
+        });
+      }
+      tbody.appendChild(tr);
+    });
+    if (data.status !== "ok") {
+      statusEl.textContent = data.message;
+      statusEl.className = "hint status-warn";
+    } else {
+      statusEl.className = "hint";
+      statusEl.textContent = data.entries.length
+        ? "Showing " + Math.min(rows.length, 300) + " of " + rows.length + " matching names" + (rows.length > 300 ? " (narrow the filter to see more)." : ".")
+        : "No lookups recorded yet. They appear here as soon as a device on the hotspot looks anything up.";
+    }
+  }
+  function poll() {
+    if (!page.classList.contains("active")) { return; }
+    fetch("/api/lookups").then(function (r) { return r.json(); }).then(function (d) {
+      data = d;
+      // Redrawing would close an "Add to rule" list someone is choosing from.
+      if (tbody.contains(document.activeElement) && document.activeElement.tagName === "SELECT") { return; }
+      render();
+    }).catch(function () {
+      statusEl.textContent = "Couldn't load lookups from the panel.";
+      statusEl.className = "hint status-warn";
+    });
+  }
+  [sel, routeSel].forEach(function (s) { s.addEventListener("change", render); });
+  filt.addEventListener("input", render);
+  document.querySelectorAll('.nav-item[data-page="lookups"]').forEach(function (btn) {
+    btn.addEventListener("click", function () { setTimeout(poll, 0); });
+  });
+  document.querySelectorAll(".lookup-link").forEach(function (link) {
+    link.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      pendingDevice = link.getAttribute("data-ip");
+      document.querySelector('.nav-item[data-page="lookups"]').click();
+    });
+  });
+  setInterval(poll, 5000);
+  // After the page script at the end of the document has restored the last-open page.
+  document.addEventListener("DOMContentLoaded", poll);
+})();
+</script>
+</section>

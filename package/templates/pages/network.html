@@ -1,0 +1,10 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-network">
+<h2>Internal Network {{ help_btn('help-internal-network') }}</h2>
+{{ help_dialog('help-internal-network', HELP_INTERNAL_NETWORK) }}
+<form method="post" action="/network">
+  <label>Internal range that bypasses the proxy (CIDR)
+    <input name="bypass_cidr" value="{{ bypass_cidr }}" placeholder="192.168.1.0/24" required>
+  </label>
+  <button type="submit">Save network settings</button>
+</form>
+</section>

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wifi-proxy-hotspot"
+version = "1.22.0"
+description = "Wi-Fi hotspot for Raspberry Pi and other Linux boxes that routes devices' traffic, per domain, through upstream HTTP/SOCKS5 proxies, with a PAM-authenticated web admin panel"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Gerry Dassi" }]
+keywords = ["raspberry-pi", "wifi-hotspot", "proxy", "redsocks", "transparent-proxy", "networkmanager", "flask"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "flask>=3.0",
+    "dnspython>=2.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/dassige/wifi-proxy-hotspot"
+Issues = "https://github.com/dassige/wifi-proxy-hotspot/issues"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.dgs-autoversion]
+git-parentCommit-ID = "03a56125bca9bfa4b8bda5827f1e782da74204ae"
+versionDate = "2026/10/12 12:00"

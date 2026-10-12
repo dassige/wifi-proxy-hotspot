@@ -1,0 +1,40 @@
+# Runs on every push and pull request. Off-box checks only: everything that
+# touches the Pi's OS (nmcli, iptables, ipset, iw, PAM) is faked in the tests,
+# so a green run proves logic, templates and inline JS -- not hardware.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11: the minimum in pyproject.toml. 3.13: what the Pi (Debian 13) runs.
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # For `node --check` on the admin page's inline <script> blocks.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: pip install flask dnspython pytest qrcode
+
+      - name: Compile-check every Python file
+        run: python -m py_compile package/*.py docs/*.py docs/pdfgen/*.py
+
+      - name: Syntax-check every shell script
+        run: for f in package/*.sh deploy.sh; do bash -n "$f"; done
+
+      - name: Tests
+        run: python -m pytest -q tests

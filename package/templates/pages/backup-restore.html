@@ -1,0 +1,18 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-backup-restore">
+<h2>Backup &amp; Restore {{ help_btn('help-backup-restore') }}</h2>
+{{ help_dialog('help-backup-restore', HELP_BACKUP_RESTORE) }}
+<p class="hint">
+Exports everything you configure here as one JSON file: proxy profiles, routing rules and
+their settings (default, Proxied Lookups, leak guards), the internal bypass range, email alert
+settings, and device names, routing and blocks. It includes proxy and SMTP passwords in plain text,
+so store the downloaded file securely. The Wi-Fi SSID/passphrase are not included and must be
+reconfigured separately if restoring to a new box.
+</p>
+<div class="button-row">
+  <a href="/config/export" class="btn-link">Export configuration</a>
+  <form method="post" action="/config/import" enctype="multipart/form-data" class="flex-row">
+    <input type="file" name="file" accept="application/json" required>
+    <button type="submit" onclick="return confirm('Import this file? It replaces the current proxy profiles, pattern rules and their settings, internal bypass range, and (if the file has them) email alert settings and device names, routing and blocks. If the blocked devices change, the Wi-Fi briefly reconnects every device.')">Import configuration</button>
+  </form>
+</div>
+</section>

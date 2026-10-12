@@ -1,0 +1,162 @@
+{% from "macros.html" import help_btn, help_dialog %}<section class="page" id="page-proxy-profiles">
+<h2>Proxy Profiles {{ help_btn('help-proxy-profiles') }}</h2>
+{{ help_dialog('help-proxy-profiles', HELP_PROXY_PROFILES) }}
+<p class="hint">
+Each profile is always available to be picked by name in Default Behaviour or a routing rule
+below — there is no separate "active" profile to switch on. A profile cannot be deleted while it
+is still referenced there. Switching a profile off (<b>Enabled</b>) stops its health checks and
+email alerts and, after you confirm, switches off the active rules that use it. That's meant for a
+proxy you only run now and then.
+</p>
+{% if profiles %}
+<table class="stack">
+  <thead><tr><th>Name</th><th>Description</th><th>Type</th><th>Address</th><th>Enabled</th></tr></thead>
+  <tbody>
+  {% for name, p in profiles.items() %}
+  {% set enabled = p.enabled is not defined or p.enabled %}
+  <tr {% if not enabled %}class="rule-disabled"{% endif %}>
+    <td data-label="Name">{{ name }}</td>
+    <td data-label="Description">{{ p.description or '—' }}</td>
+    <td data-label="Type">{{ 'HTTP' if p.type == 'http-connect' else 'SOCKS5' }}</td>
+    <td data-label="Address">{{ p.ip }}:{{ p.port }}</td>
+    <td data-label="Enabled">
+      <form method="post" action="/proxy-profile/enabled" class="inline-form profile-toggle"
+            data-profile="{{ name }}" data-default="{{ '1' if default_action == name else '0' }}"
+            data-rules='{{ profile_rules[name] | tojson }}' data-devices='{{ profile_device_labels[name] | tojson }}'
+            data-restore='{{ profile_restore[name] | tojson }}'>
+        <input type="hidden" name="name" value="{{ name }}">
+        <input type="hidden" name="restore" value="0">
+        <input type="hidden" name="enabled" value="{{ '0' if enabled else '1' }}">
+        <label class="toggle-switch" title="{{ 'Health-checked every 2 minutes, with email alerts' if enabled else 'Disabled: not checked, never alerts' }}">
+          <input type="checkbox" {{ 'checked' if enabled else '' }} onchange="wpxProfileToggle(this)" aria-label="Enable proxy profile {{ name }}">
+          <span class="toggle-slider"></span>
+        </label>
+      </form>
+      {% if not enabled and profile_rules[name] %}<span class="monitor-warn">Still used by an enabled rule</span>{% endif %}
+    </td>
+  </tr>
+  <tr class="actions-row">
+    <td colspan="5">
+      <form method="get" action="/" class="inline-form">
+        <input type="hidden" name="edit" value="{{ name }}">
+        <button type="submit">Edit</button>
+      </form>
+      <form method="post" action="/proxy-profile/delete" class="inline-form">
+        <input type="hidden" name="name" value="{{ name }}">
+        <button type="submit" onclick="return confirm('Delete proxy profile {{ name }}? This cannot be undone.')">Delete</button>
+      </form>
+      <span class="inline-form">
+        <button type="button" class="check-btn" data-profile="{{ name }}">Check</button>
+      </span>
+      <span class="check-result" data-profile-result="{{ name }}"></span>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<script>
+// Disabling a profile also switches off the active rules that use it (done
+// server-side), so ask first when there are any; the Default Behaviour's
+// profile can't be disabled at all.
+window.wpxProfileToggle = function (box) {
+  var form = box.form;
+  var name = form.getAttribute("data-profile");
+  if (box.checked) {
+    // Re-enabling: offer to put back what was switched off with it.
+    var back = JSON.parse(form.getAttribute("data-restore") || "[]");
+    if (back.length) {
+      form.elements.restore.value = confirm('Enable "' + name + '". Also switch these back on, as they were before it was disabled?\n- ' +
+        back.join('\n- ') + '\n\nOK: switch them back on too. Cancel: enable only the profile.') ? "1" : "0";
+    }
+  }
+  if (!box.checked) {
+    if (form.getAttribute("data-default") === "1") {
+      // (This template is a plain Python string: JS escapes need doubling, "\n".)
+      alert('"' + name + '" is the Default Behaviour, so it can' + "'" + 't be disabled. Point the default at another proxy or Direct first (Routing Rules page).');
+      box.checked = true;
+      return;
+    }
+    var rules = JSON.parse(form.getAttribute("data-rules") || "[]");
+    var devices = JSON.parse(form.getAttribute("data-devices") || "[]");
+    if (rules.length || devices.length) {
+      var msg = 'Disable proxy profile "' + name + '"?';
+      if (rules.length) {
+        msg += '\n\n' + (rules.length === 1 ? 'This active pattern rule uses it and will also be switched off:'
+          : 'These ' + rules.length + ' active pattern rules use it and will also be switched off:') +
+          '\n- ' + rules.join('\n- ');
+      }
+      if (devices.length) {
+        msg += '\n\n' + (devices.length === 1 ? 'This device always uses it and will go back to following the rules:'
+          : 'These ' + devices.length + ' devices always use it and will go back to following the rules:') +
+          '\n- ' + devices.join('\n- ');
+      }
+      msg += "\n\nTurning the profile back on later won't undo this by itself.";
+      if (!confirm(msg)) {
+        box.checked = true;
+        return;
+      }
+    }
+  }
+  form.submit();
+};
+(function () {
+  function fmtMs(ms) { return (ms === null || ms === undefined) ? '—' : Math.round(ms) + 'ms'; }
+  document.querySelectorAll('.check-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var name = btn.getAttribute('data-profile');
+      var resultEl = document.querySelector('.check-result[data-profile-result="' + name + '"]');
+      btn.disabled = true;
+      resultEl.className = 'check-result';
+      resultEl.textContent = 'Checking…';
+      fetch('/proxy-profile/check', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'name=' + encodeURIComponent(name)
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        btn.disabled = false;
+        if (data.ok) {
+          resultEl.className = 'check-result status-badge status-online';
+          resultEl.textContent = 'OK — connect ' + fmtMs(data.timings.tcp_connect_ms) +
+            ', auth ' + fmtMs(data.timings.proxy_connect_ms) +
+            ', TLS ' + fmtMs(data.timings.tls_handshake_ms) +
+            ', total ' + fmtMs(data.timings.total_ms);
+        } else {
+          resultEl.className = 'check-result status-badge status-blocked';
+          resultEl.textContent = 'Failed: ' + (data.error || 'unknown error');
+        }
+      }).catch(function () {
+        btn.disabled = false;
+        resultEl.className = 'check-result status-badge status-blocked';
+        resultEl.textContent = 'Failed: request error';
+      });
+    });
+  });
+})();
+</script>
+{% else %}
+<p>No proxy profiles saved yet.</p>
+{% endif %}
+
+<details class="add-profile" {{ 'open' if edit_profile else '' }}>
+  <summary>{{ 'Edit Proxy Profile' if edit_profile else 'Add Proxy Profile' }}</summary>
+  <form method="post" action="/proxy-profile/save">
+    <label>Name
+      <input name="name" value="{{ edit_name }}" {{ 'readonly' if edit_profile else '' }} required>
+    </label>
+    <label>Description <input name="description" value="{{ edit_profile.description if edit_profile else '' }}"></label>
+    <label>Type
+      <select name="type">
+        <option value="http-connect" {{ 'selected' if not edit_profile or edit_profile.type == 'http-connect' else '' }}>HTTP</option>
+        <option value="socks5" {{ 'selected' if edit_profile and edit_profile.type == 'socks5' else '' }}>SOCKS5</option>
+      </select>
+    </label>
+    <label>Address <input name="ip" value="{{ edit_profile.ip if edit_profile else '' }}" required></label>
+    <label>Port <input name="port" value="{{ edit_profile.port if edit_profile else '' }}" required></label>
+    <label>Username <input name="login" value="{{ edit_profile.login if edit_profile else '' }}"></label>
+    <label>Password
+      <input name="password" type="password" placeholder="{{ 'leave blank to keep current' if edit_profile else '(optional)' }}">
+    </label>
+    <button type="submit">Save Profile</button>
+  </form>
+</details>
+</section>

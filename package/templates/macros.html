@@ -1,0 +1,10 @@
+{# Help (?) button and its dialog, imported by admin.html and every page. #}
+{% macro help_btn(id) -%}
+<button type="button" class="help-btn" onclick="document.getElementById('{{ id }}').showModal()" aria-label="Help">?</button>
+{%- endmacro %}
+{% macro help_dialog(id, body) -%}
+<dialog id="{{ id }}" class="help-dialog">
+  {{ body | safe }}
+  <form method="dialog"><button type="submit" class="help-close">Close</button></form>
+</dialog>
+{%- endmacro %}
