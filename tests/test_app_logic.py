@@ -272,6 +272,12 @@ def test_alerts_form(app_module):
     assert app_module.parse_alerts_form({"smtp_host": "h.com", "smtp_port": "99999"}, current)[1] == "Invalid SMTP port"
     assert "recipient" in app_module.parse_alerts_form({"smtp_host": "h.com", "recipients": "a@b.com, nope"}, current)[1]
     assert "To turn alerts on" in app_module.parse_alerts_form({"enabled": "1"}, current)[1]
+    assert cfg["recover_after_min"] == 10 and cfg["min_interval_min"] == 30   # not in the form: kept
+    cfg, err = app_module.parse_alerts_form({"recover_after_min": " 0 ", "min_interval_min": "60"}, current)
+    assert err is None and (cfg["recover_after_min"], cfg["min_interval_min"]) == (0, 60)
+    for bad in ("-1", "abc", "1441", ""):
+        assert "At most one email every" in app_module.parse_alerts_form({"min_interval_min": bad}, current)[1]
+    assert "Recovered after" in app_module.parse_alerts_form({"recover_after_min": "241"}, current)[1]
 
 
 def test_health_view_hides_internal_fields(app_module, monkeypatch, tmp_path):

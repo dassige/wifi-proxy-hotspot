@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wifi-proxy-hotspot"
-version = "1.22.0"
+version = "1.22.1"
 description = "Wi-Fi hotspot for Raspberry Pi and other Linux boxes that routes devices' traffic, per domain, through upstream HTTP/SOCKS5 proxies, with a PAM-authenticated web admin panel"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,5 +30,5 @@ Issues = "https://github.com/dassige/wifi-proxy-hotspot/issues"
 py-modules = []
 
 [tool.dgs-autoversion]
-git-parentCommit-ID = "03a56125bca9bfa4b8bda5827f1e782da74204ae"
-versionDate = "2026/10/12 12:00"
+git-parentCommit-ID = "8c68c616087b556449d4648627b4cfeb5954d5b5"
+versionDate = "2026/10/21 14:14"

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.22.1] - 2026/10/21
+
+- Enhance email alert system with limits and recovery handling
+
+- Introduced limits for email alerts: "Recovered after OK for" and "At most one email every" to prevent flooding from flapping proxies.
+- Updated the email alert configuration form to include new fields for setting these limits.
+- Modified the alert logic to ensure recovery emails are sent only after the specified duration of stability.
+- Implemented grouping of alerts to minimize email spamming during rapid state changes.
+- Added tests to validate the new alert limits and ensure proper functionality under various scenarios.
+
 ## [1.22.0] - 2026/10/12
 
 First public release.

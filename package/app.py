@@ -30,7 +30,7 @@ from help_texts import (  # noqa: F401  (passed to the templates in render())
     HELP_SYSTEM,
     HELP_HELP,
 )
-from mailer import DEFAULTS as _MAILER_DEFAULTS, load_alerts_config, save_alerts_config, send_email
+from mailer import DEFAULTS as _MAILER_DEFAULTS, LIMITS as _MAILER_LIMITS, load_alerts_config, save_alerts_config, send_email
 from pattern_match import match_rule, matching_pattern, prepare_rule, rule_patterns
 from proxy_check import check_proxy_profile
 
@@ -1376,6 +1376,12 @@ def parse_alerts_form(form, current):
         return None, f"Invalid recipient address: {bad[0].strip()[:60]}"
     if sender and not EMAIL_RE.fullmatch(sender):
         return None, "Invalid sender address"
+    limits = {}
+    for key, what in (("recover_after_min", "Recovered after"), ("min_interval_min", "At most one email every")):
+        raw = str(form.get(key, current.get(key, _MAILER_DEFAULTS[key]))).strip()
+        if not raw.isdigit() or int(raw) > _MAILER_LIMITS[key]:
+            return None, f"{what}: enter a number of minutes from 0 to {_MAILER_LIMITS[key]}"
+        limits[key] = int(raw)
     config = dict(current)
     config.update(
         enabled=form.get("enabled") == "1",
@@ -1386,6 +1392,7 @@ def parse_alerts_form(form, current):
         sender=sender,
         recipients=recipients[:500],
         notify_boot=form.get("notify_boot") == "1",
+        **limits,
     )
     if form.get("password"):
         config["password"] = form["password"]

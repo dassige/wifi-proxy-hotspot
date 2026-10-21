@@ -13,11 +13,16 @@ disk, memory). Writes the results to /run/rasp-proxy-health/status.json
 Alerts by email (settings from the System page, see mailer.py) only on
 *changes*: a problem must be seen on FAIL_AFTER_RUNS consecutive runs before
 it's reported, which rides out a firewall rebuild or a restart caught
-mid-check. Recovery is reported too. Some things are one-off notices
-instead (box restarted, under-voltage seen in the kernel log, a proxy's
-exit country changing). An email that can't be sent -- likely exactly when
-the internet is what's broken -- stays queued in the persistent state file
-and is retried every run, so it still arrives once things recover.
+mid-check. Recovery is reported too, but only once the check has stayed OK
+for recover_after_min minutes; failing again before that keeps the original
+alert open instead of sending another PROBLEM/RECOVERED pair, so a flapping
+proxy costs two emails, not dozens. Some things are one-off notices instead
+(box restarted, under-voltage seen in the kernel log, a proxy's exit country
+changing). Emails go out at most once every min_interval_min minutes: the
+first one after a quiet spell is immediate, anything after it is held and
+sent together as one digest. An email that can't be sent -- likely exactly
+when the internet is what's broken -- stays queued in the persistent state
+file and is retried every run, so it still arrives once things recover.
 
 Alert-only by design: nothing here ever changes routing.
 
@@ -38,7 +43,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, "/opt/rasp-proxy-admin")
-from mailer import is_configured, load_alerts_config, send_email  # noqa: E402
+from mailer import alert_limit, is_configured, load_alerts_config, send_email  # noqa: E402
 from proxy_check import check_proxy_profile, get_exit_info  # noqa: E402
 
 AP_IFACE = os.environ.get("RASP_PROXY_AP_IFACE", "wlan0")
@@ -424,14 +429,21 @@ def read_guard_counters():
     }
 
 
-def format_email(messages, checks, now):
+def format_email(messages, checks, now, alerting=(), interval=0):
+    # The subject reflects how things stand now: a digest whose problems have
+    # all recovered since is a RECOVERED email, not a PROBLEM one.
     problems = [m for m in messages if m["kind"] == "PROBLEM"]
+    still_open = [m for m in problems if m.get("id") in alerting]
     recovered = [m for m in messages if m["kind"] == "RECOVERED"]
-    first = (problems or recovered or messages)[0]
-    kind = "PROBLEM" if problems else "RECOVERED" if recovered else "NOTICE"
+    first = (still_open or recovered or problems or messages)[0]
+    kind = ("PROBLEM" if still_open or (problems and not recovered) else "RECOVERED" if recovered
+            else "NOTICE")
     more = f" (+{len(messages) - 1} more)" if len(messages) > 1 else ""
     subject = f"[{HOSTNAME}] {kind}: {first['text'].split(':')[0][:80]}{more}"
     lines = [f"{HOSTNAME} health check, {when(now)}", ""]
+    if len(messages) > 1 and interval:
+        lines += [f"{len(messages)} alerts since {when(messages[0]['time'])}, grouped into one email "
+                  f"(at most one every {interval // 60} min).", ""]
     for m in messages:
         lines.append(f"{m['kind']:<10} {when(m['time'])}  {m['text']}")
     not_ok = [c for c in checks if c["status"] not in QUIET]
@@ -442,8 +454,8 @@ def format_email(messages, checks, now):
     return subject, "\n".join(lines) + "\n"
 
 
-def main():
-    now = time.time()
+def main(now=None):
+    now = time.time() if now is None else now
     state = load_json(STATE_FILE, {})
     state_before = json.dumps(state, sort_keys=True)
     prev_status = load_json(STATUS_FILE, {})
@@ -484,6 +496,7 @@ def main():
             checks.append(check(f"internal:{getattr(fn, '__name__', 'check')}", "System", "Health check",
                                 "warn", f"A check crashed: {type(e).__name__}: {e}"[:160], alert=False))
 
+    recover_after = alert_limit(alerts, "recover_after_min") * 60
     prev = state.get("checks", {})
     new_state, messages = {}, []
     for c in checks:
@@ -494,26 +507,42 @@ def main():
         # it grow would rewrite the state file (SD card) on every run for as
         # long as something stays down.
         bad_runs = min(p.get("bad_runs", 0) + 1, FAIL_AFTER_RUNS) if bad else 0
-        bad_since = (p.get("bad_since") or now) if bad else None
         alerting = p.get("alerting", False) and c["alert"]
+        # While alerting, bad_since is the start of the whole episode and
+        # good_since the start of the current OK stretch (recovery pending).
+        bad_since = (p.get("bad_since") or now) if bad or alerting else None
+        good_since = (p.get("good_since") or now) if alerting and not bad else None
+        relapses = p.get("relapses", 0) if alerting else 0
         if bad and c["alert"] and not alerting and bad_runs >= FAIL_AFTER_RUNS:
             alerting = True
-            messages.append({"kind": "PROBLEM", "time": now, "text": f"{c['label']}: {c['detail']}"})
-        elif not bad and alerting:
+            messages.append({"kind": "PROBLEM", "id": c["id"], "time": now,
+                             "text": f"{c['label']}: {c['detail']}"})
+        elif bad and alerting and p.get("good_since"):
+            relapses += 1  # failed again before its recovery was confirmed: still the same alert
+        elif good_since and now - good_since >= recover_after:
             alerting = False
-            down = (now - p.get("bad_since", now)) / 60
-            messages.append({"kind": "RECOVERED", "time": now,
-                             "text": f"{c['label']}: {c['detail']} (was down about {down:.0f} min)"})
+            down = (good_since - bad_since) / 60
+            again = f", failed again {relapses}x before staying up" if relapses else ""
+            messages.append({"kind": "RECOVERED", "id": c["id"], "time": now,
+                             "text": f"{c['label']}: {c['detail']} (was down about {down:.0f} min{again})"})
+            bad_since, good_since, relapses = None, None, 0
         new_state[c["id"]] = {"status": c["status"], "since": c["since"], "bad_runs": bad_runs,
                               "bad_since": bad_since, "alerting": alerting}
+        if alerting:
+            new_state[c["id"]].update(good_since=good_since, relapses=relapses)
     state["checks"] = new_state
     messages += [{"kind": kind, "time": now, "text": text} for kind, text in events]
 
     enabled = alerts.get("enabled") and is_configured(alerts)
     pending = (state.get("pending", []) + messages)[-PENDING_MAX:] if enabled else []
     delivery = state.setdefault("delivery", {})
-    if pending:
-        subject, body = format_email(pending, checks, now)
+    interval = alert_limit(alerts, "min_interval_min") * 60
+    last_sent = delivery.get("last_sent") or 0
+    # A clock that went backwards (last_sent in the future) mustn't hold mail forever.
+    held_until = last_sent + interval if pending and 0 <= now - last_sent < interval else None
+    if pending and not held_until:
+        alerting = {cid for cid, st in new_state.items() if st["alerting"]}
+        subject, body = format_email(pending, checks, now, alerting, interval)
         error = send_email(alerts, subject, body)
         if error:
             delivery["last_error"] = error  # no timestamp: it would change the state file every run
@@ -529,7 +558,8 @@ def main():
         "hostname": HOSTNAME,
         "overall": {0: "ok", 1: "warn", 2: "fail"}[worst],
         "checks": checks,
-        "alerts": {"enabled": bool(enabled), "pending": len(pending), **delivery},
+        "alerts": {"enabled": bool(enabled), "pending": len(pending), "held_until": held_until,
+                   "min_interval_min": interval // 60, **delivery},
         "rule_connections": read_rule_connections(),
         "guard_counters": read_guard_counters(),
     }

@@ -47,6 +47,17 @@ here ever changes routing.
   </div>
   <label>Send alerts to <input name="recipients" value="{{ alerts.recipients }}" placeholder="you@example.com, other@example.com"></label>
   <label class="inline-check"><input type="checkbox" name="notify_boot" value="1" {{ 'checked' if alerts.notify_boot else '' }}> Also email when the box restarts</label>
+  <div class="form-grid">
+    <label>Recovered after OK for (minutes)
+      <input name="recover_after_min" value="{{ alerts.recover_after_min }}" inputmode="numeric">
+    </label>
+    <label>At most one email every (minutes)
+      <input name="min_interval_min" value="{{ alerts.min_interval_min }}" inputmode="numeric">
+    </label>
+  </div>
+  <p class="hint">These keep a flapping proxy from flooding your inbox: a problem only counts as
+  recovered once it has stayed OK this long, and alerts arriving soon after an email are grouped
+  into the next one. 0 turns either limit off.</p>
   <div class="button-row">
     <button type="submit">Save alert settings</button>
     <button type="button" id="alerts-test">Send test email</button>

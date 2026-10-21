@@ -181,6 +181,17 @@ problem has to show up on two checks in a row (about 4 minutes) before it's repo
 blip, such as a service restarting, doesn't wake you up. You also get one-off notices: the box
 restarting (if ticked), under-voltage seen in the kernel log, and a proxy's exit IP or its
 country changing (which can break geo-blocked sites).</p>
+<p><b>Limiting the number of emails.</b> A proxy that keeps dropping out and coming back would
+otherwise send a PROBLEM and a RECOVERED email every few minutes. Two settings stop that:</p>
+<ul>
+<li><b>Recovered after OK for</b> (default 10 minutes): a problem only counts as recovered once
+it has stayed OK this long. If it fails again before that, it's still the same problem, so no new
+email. The RECOVERED email says how many times it failed again on the way.</li>
+<li><b>At most one email every</b> (default 30 minutes): the first alert after a quiet spell is
+sent straight away; anything after it waits and goes out together in one email. The Overview page
+shows when held alerts will be sent.</li>
+</ul>
+<p>Set either one to 0 to turn it off.</p>
 <p>If an alert can't be sent, for example because the internet itself is down, it's kept and retried
 every 2 minutes, so it still arrives once the connection is back.</p>
 <p><b>Gmail:</b> server <code>smtp.gmail.com</code>, port 587, STARTTLS, your Gmail address as the

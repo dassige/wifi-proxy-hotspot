@@ -68,12 +68,15 @@
       text = "Email alerts are off. Set them up under System → Email Alerts to hear about problems without opening this page.";
     } else {
       text = "Email alerts are on." + (a.last_sent ? " Last sent " + stamp(a.last_sent) + "." : " None sent yet.");
-      if (a.pending) {
+      if (a.pending && a.held_until) {
+        text += " " + a.pending + " alert(s) held, to be sent together at " + stamp(a.held_until) +
+          " (at most one email every " + a.min_interval_min + " min).";
+      } else if (a.pending) {
         text += " " + a.pending + " alert(s) waiting to be sent" + (a.last_error ? " (last attempt: " + a.last_error + ")" : "") + ", retried every run.";
       }
     }
     alertsEl.textContent = text;
-    alertsEl.className = "hint" + (a.pending ? " status-warn" : "");
+    alertsEl.className = "hint" + (a.pending && !a.held_until ? " status-warn" : "");
   }
   function poll() {
     return fetch("/api/health").then(function (r) { return r.json(); }).then(function (d) {

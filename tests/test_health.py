@@ -29,6 +29,10 @@ class Box:
         self.smtp_up = False
         self.sent = []
         self.checked = []
+        self.now = None                                            # None: the real clock
+        # Limits off unless a test sets them, so the basic state machine is tested on its own.
+        self.alerts = dict(mailer.DEFAULTS, enabled=True, smtp_host="smtp.example.com", recipients="me@example.com",
+                           password=SMTP_PW, recover_after_min=0, min_interval_min=0)
         self.profiles = {
             "default": {"type": "http-connect", "ip": "1.2.3.4", "port": "8080", "login": "u",
                         "password": SECRET, "local_port": 20000},
@@ -104,8 +108,7 @@ def box(tmp_path, monkeypatch):
     monkeypatch.setattr(health, "get_exit_info",
                         lambda p: {"ip": "89.1.1.1", "country": b.country, "city": "Milan", "org": "x"})
     monkeypatch.setattr(health, "send_email", b.send)
-    monkeypatch.setattr(health, "load_alerts_config", lambda: dict(
-        mailer.DEFAULTS, enabled=True, smtp_host="smtp.example.com", recipients="me@example.com", password=SMTP_PW))
+    monkeypatch.setattr(health, "load_alerts_config", lambda: dict(b.alerts))
     for attr, name in (("PROXY_STORE", "proxies.json"), ("RULES_FILE", "rules.json"), ("LOOKUPS_FILE", "lookups.json"),
                        ("STATUS_FILE", "status.json"), ("STATE_FILE", "state.json")):
         monkeypatch.setattr(health, attr, b.path(name))
@@ -114,7 +117,7 @@ def box(tmp_path, monkeypatch):
 
     def run_once():
         b.write("proxies.json", {"profiles": b.profiles})
-        health.main()
+        health.main(b.now)
         return (json.loads((tmp_path / "status.json").read_text()),
                 json.loads((tmp_path / "state.json").read_text()))
 
@@ -151,8 +154,9 @@ def test_debounce_queue_retry_and_recovery(box):
     s, st = box.run_once()
     assert len(box.sent) == 1 and st["pending"] == []
     subject, body = box.sent[0]
-    assert subject.startswith(f"[{health.HOSTNAME}] PROBLEM: ") and "(+3 more)" in subject
-    assert body.count("RECOVERED") == 2 and "was down about" in body
+    # Everything in it has recovered by the time it goes out, so the subject says so.
+    assert subject.startswith(f"[{health.HOSTNAME}] RECOVERED: ") and "(+3 more)" in subject
+    assert body.count("PROBLEM") == 2 and body.count("RECOVERED") == 2 and "was down about" in body
 
 
 def test_firewall_incomplete_alerts_then_recovers(box):
@@ -194,6 +198,78 @@ def test_disabled_profiles_are_not_checked_and_never_alert(box):
     box.run_once()
     box.run_once()
     assert "1.2.3.4" in box.checked and len(box.sent) == 1
+
+
+def test_flapping_proxy_sends_one_problem_and_one_recovery(box):
+    box.smtp_up, box.alerts["recover_after_min"] = True, 10
+    box.now = 1_000_000.0
+
+    def run(proxy_ok, minutes=2):
+        box.proxy_ok = proxy_ok
+        s, st = box.run_once()
+        box.now += minutes * 60
+        return s, st
+
+    run(True)
+    run(False)
+    run(False)
+    assert [m[0].split(": ")[0] for m in box.sent] == [f"[{health.HOSTNAME}] PROBLEM"]
+    for _ in range(5):                                             # up 4 min, down 2 min, all day long
+        run(True)
+        run(True)
+        run(False)
+    s, st = box.run_once()
+    assert len(box.sent) == 1 and st["checks"]["proxy:default"]["relapses"] == 5
+    assert st["checks"]["proxy:default"]["alerting"] and by_id(s)["proxy:default"]["status"] == "fail"
+    for _ in range(6):                                             # finally stays up for 10 minutes
+        run(True)
+    subject, body = box.sent[-1]
+    assert len(box.sent) == 2 and "RECOVERED" in subject
+    assert "was down about 34 min, failed again 5x before staying up" in body
+    st = json.loads((box.tmp / "state.json").read_text())
+    assert "good_since" not in st["checks"]["proxy:default"]          # nothing left over once closed
+
+
+def test_emails_are_grouped_by_the_minimum_interval(box):
+    box.smtp_up, box.alerts["min_interval_min"] = True, 30
+    box.now = 1_000_000.0
+    box.redsocks = "failed"
+    box.run_once()
+    box.run_once()
+    assert len(box.sent) == 1                                      # first one after a quiet spell: at once
+    box.now += 4 * 60
+    box.redsocks = "active"
+    s, st = box.run_once()                                         # recovery: held
+    assert len(box.sent) == 1 and len(st["pending"]) == 1
+    assert s["alerts"]["held_until"] == 1_000_000.0 + 1800 and s["alerts"]["min_interval_min"] == 30
+    box.now += 4 * 60
+    box.redsocks = "failed"
+    box.run_once()
+    box.run_once()                                                 # down again: held too
+    box.now = 1_000_000.0 + 1800
+    s, st = box.run_once()
+    assert len(box.sent) == 2 and st["pending"] == [] and s["alerts"]["held_until"] is None
+    subject, body = box.sent[-1]
+    assert "PROBLEM" in subject and "(+1 more)" in subject         # it's down again right now
+    assert "2 alerts since" in body and "at most one every 30 min" in body
+
+
+def test_clock_going_backwards_does_not_hold_mail_forever(box):
+    box.smtp_up, box.alerts["min_interval_min"] = True, 30
+    box.now = 2_000_000.0
+    box.redsocks = "failed"
+    box.run_once()
+    box.run_once()
+    box.now, box.redsocks = 1_000_000.0, "active"
+    box.run_once()
+    assert len(box.sent) == 2
+
+
+def test_alert_limits_tolerate_bad_values():
+    assert mailer.alert_limit({}, "min_interval_min") == 30
+    assert mailer.alert_limit({"min_interval_min": "x"}, "min_interval_min") == 30
+    assert mailer.alert_limit({"min_interval_min": -5}, "min_interval_min") == 0
+    assert mailer.alert_limit({"recover_after_min": 10**9}, "recover_after_min") == 240
 
 
 def test_one_crashing_check_does_not_hide_the_rest(box, monkeypatch):

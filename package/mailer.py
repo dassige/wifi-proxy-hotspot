@@ -25,7 +25,11 @@ DEFAULTS = {
     "sender": "",
     "recipients": "",
     "notify_boot": True,
+    # Limits on how many emails a flapping check can cause (rasp-proxy-health).
+    "recover_after_min": 10,
+    "min_interval_min": 30,
 }
+LIMITS = {"recover_after_min": 240, "min_interval_min": 1440}
 
 
 def load_alerts_config():
@@ -36,6 +40,17 @@ def load_alerts_config():
     except (OSError, ValueError):
         pass
     return config
+
+
+def alert_limit(config, key):
+    """One of the LIMITS settings as whole minutes, clamped to its range. An
+    imported or hand-edited file can hold anything, so bad values fall back to
+    the default rather than breaking the health check."""
+    try:
+        value = int(config.get(key, DEFAULTS[key]))
+    except (TypeError, ValueError):
+        value = DEFAULTS[key]
+    return min(max(value, 0), LIMITS[key])
 
 
 def save_alerts_config(config):
