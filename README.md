@@ -228,7 +228,8 @@ these:
 - **`deploy.sh`** from a development machine pushes only the changed code
   files over SSH and restarts only the affected services. It needs SSH key
   access and passwordless `sudo` on the box. Put an SSH config with a host
-  alias in `keys/ssh_config` (gitignored), then run
+  alias in `keys/ssh_config` (gitignored) or in a `keys/ssh_config` one folder
+  up, next to the repo, then run
   `./deploy.sh --dry-run --host <alias>` to see what would change.
 
 ## Uninstall

@@ -23,13 +23,14 @@
 #   ./deploy.sh --dry-run    only show what would change
 #   ./deploy.sh --yes        deploy without asking (non-interactive use)
 # Options: --host <ssh host alias> (default rasp-proxy),
-#          --ssh-config <file>     (default keys/ssh_config)
+#          --ssh-config <file>     (default ../keys/ssh_config if present, else keys/ssh_config)
 # ==============================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 HOST="rasp-proxy"
-SSH_CONFIG="$ROOT/keys/ssh_config"
+# Prefer a shared keys folder next to the repo (../keys/), else the repo-local keys/.
+if [ -f "$ROOT/../keys/ssh_config" ]; then SSH_CONFIG="$ROOT/../keys/ssh_config"; else SSH_CONFIG="$ROOT/keys/ssh_config"; fi
 DRY_RUN=0
 ASSUME_YES=0
 while [ $# -gt 0 ]; do
