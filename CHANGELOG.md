@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.22.2] - 2026/11/18
+
+- Enhance firewall initialization checks and testing for dependency failures
+- chore: deploy.sh prefers ../keys/ssh_config when present
+
 ## [1.22.1] - 2026/10/21
 
 - Enhance email alert system with limits and recovery handling

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +27,7 @@ class Box:
         self.country = "IT"
         self.boot = "boot-1"
         self.nat_rules = 3
+        self.fw_init = ("active", "success")                       # (ActiveState, Result)
         self.smtp_up = False
         self.sent = []
         self.checked = []
@@ -55,7 +57,7 @@ class Box:
         if cmd[:2] == ["systemctl", "is-active"]:
             out = self.redsocks if cmd[2] == "redsocks" else "active"
         elif cmd[:2] == ["systemctl", "show"]:
-            out = "ActiveState=active\nResult=success\n"
+            out = "ActiveState={}\nResult={}\n".format(*self.fw_init)
         elif cmd[:2] == ["nmcli", "-g"]:
             out = "yes\n"
         elif cmd[:3] == ["nmcli", "-t", "-f"]:
@@ -168,6 +170,28 @@ def test_firewall_incomplete_alerts_then_recovers(box):
     box.nat_rules = 3
     box.run_once()
     assert "RECOVERED" in box.sent[-1][0]
+
+
+@pytest.mark.parametrize("state,result,expected", [
+    ("active", "success", "ok"),
+    ("activating", "success", "ok"),
+    ("inactive", "success", "fail"),       # start job failed with result 'dependency' (2026-11-18)
+    ("failed", "exit-code", "fail"),
+])
+def test_firewall_init_that_never_ran_is_a_failure(box, state, result, expected):
+    box.fw_init = (state, result)
+    s, _ = box.run_once()
+    assert by_id(s)["svc:firewall-init"]["status"] == expected
+
+
+def test_redsocks_dropin_retriggers_firewall_init_unless_active():
+    # A dependency-failed oneshot is "inactive", not "failed": is-failed never fires.
+    conf = (Path(__file__).resolve().parent.parent / "package" / "redsocks-override.conf").read_text()
+    post = [l for l in conf.splitlines() if l.startswith("ExecStartPost=")]
+    assert len(post) == 1
+    assert "is-active --quiet rasp-proxy-firewall-init.service" in post[0]
+    assert "is-failed" not in post[0]
+    assert "start --no-block rasp-proxy-firewall-init.service" in post[0]   # blocking start would deadlock
 
 
 def test_notices_exit_change_and_restart(box):

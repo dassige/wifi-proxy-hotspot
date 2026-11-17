@@ -138,10 +138,21 @@ def check_services():
     props = dict(line.split("=", 1) for line in run(
         ["systemctl", "show", "-p", "ActiveState", "-p", "Result", "rasp-proxy-firewall-init"]
     ).stdout.splitlines() if "=" in line)
-    bad = props.get("ActiveState") == "failed" or props.get("Result", "success") != "success"
-    out.append(check("svc:firewall-init", "Services", "Boot-time firewall setup",
-                     "fail" if bad else "ok",
-                     f"Failed ({props.get('Result', 'unknown')})" if bad else "Completed"))
+    # A oneshot with RemainAfterExit=yes stays "active" once it has run. When its
+    # start job fails because a dependency failed (redsocks couldn't resolve a
+    # hostname at boot, 2026-11-18), it is left "inactive" with Result=success,
+    # so "inactive" has to count as a failure too, not only "failed".
+    state = props.get("ActiveState", "unknown")
+    result = props.get("Result", "success")
+    if state == "activating":
+        status, detail = "ok", "Running"
+    elif state == "active" and result == "success":
+        status, detail = "ok", "Completed"
+    elif state == "inactive" and result == "success":
+        status, detail = "fail", "Did not run this boot (a dependency failed?)"
+    else:
+        status, detail = "fail", f"Failed ({result})"
+    out.append(check("svc:firewall-init", "Services", "Boot-time firewall setup", status, detail))
     return out
 
 
