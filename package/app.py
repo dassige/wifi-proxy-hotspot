@@ -235,9 +235,10 @@ def load_store():
 
 
 def save_store(store, apply_to_redsocks=True):
-    # apply_to_redsocks=False is for settings redsocks doesn't use (such as
-    # "enabled"), so changing them doesn't restart redsocks and drop every
-    # proxied connection.
+    # apply_to_redsocks=False is for settings redsocks doesn't use, so
+    # changing them doesn't restart redsocks and drop every proxied
+    # connection. "enabled" IS used: disabled profiles are left out of
+    # redsocks.conf (see write_redsocks_conf_all).
     os.makedirs(os.path.dirname(PROXY_STORE), exist_ok=True)
     with open(PROXY_STORE, "w") as f:
         json.dump(store, f, indent=2)
@@ -251,8 +252,20 @@ def write_redsocks_conf_all(profiles):
     # local port, so different pattern rules/the default can each pick a
     # different upstream proxy simultaneously (redsocks supports this
     # natively within a single config/daemon instance).
+    #
+    # Disabled profiles are left out. redsocks resolves a hostname "ip" once
+    # at startup and refuses to start at all if that fails, so an unused
+    # profile could take every other one down with it (2026-11-18: a power
+    # outage, DNS not up yet at boot, a disabled hostname profile, and no
+    # routing for two hours). Nothing routes through a disabled profile
+    # anyway: the app won't point anything enabled at one, and the firewall
+    # helper sends whatever still does direct instead of to its dead port.
+    # With every profile disabled, redsocks runs with no blocks (verified on
+    # the box: it starts and stays up).
     blocks = []
     for p in profiles.values():
+        if not p.get("enabled", True):
+            continue
         blocks.append(
             "redsocks {\n"
             "    local_ip = 0.0.0.0;\n"
@@ -350,7 +363,7 @@ def set_profile_enabled(name, enabled, restore=False):
         profile = store["profiles"][name]
         profile["enabled"] = True
         remembered = profile.pop("disabled_with", None) or {}
-        save_store(store, apply_to_redsocks=False)
+        save_store(store)  # adds its redsocks block back (restarts redsocks) before anything routes to it
         if not restore:
             pending = restorable(name, remembered, load_pattern_config())
             if pending["rules"] or pending["devices"]:
@@ -393,7 +406,7 @@ def set_profile_enabled(name, enabled, restore=False):
     store["profiles"][name]["enabled"] = False
     # Remembered so re-enabling can offer to put exactly these back.
     store["profiles"][name]["disabled_with"] = {"rules": switched_off_ids, "devices": sorted(released)}
-    save_store(store, apply_to_redsocks=False)
+    save_store(store)  # drops its redsocks block (restarts redsocks), after the firewall stopped using it
     message = f'Proxy profile "{name}" disabled: no health checks or email alerts for it.'
     if switched_off:
         message += (f" Also switched off {len(switched_off)} pattern rule{'s' if len(switched_off) != 1 else ''} "
@@ -1309,8 +1322,19 @@ def rule_notes(patterns, mode, action):
                       "A more specific pattern or an exact hostname is usually better.")
     profile = load_store()["profiles"].get(action)
     if profile and not profile.get("enabled", True):
-        notes += f' Note: its proxy profile "{action}" is disabled, so it isn\'t health-checked.'
+        # Only reachable via an import or a hand-edited file: the page refuses it.
+        notes += f' Note: its proxy profile "{action}" is disabled, so this rule goes direct for now.'
     return notes
+
+
+def disabled_profile_error(action):
+    # Mirrors the default action and device routing: nothing enabled may
+    # point at a disabled profile, which has no redsocks block to receive it.
+    profile = load_store()["profiles"].get(action)
+    if profile and not profile.get("enabled", True):
+        return (f'"{action}" is disabled. Enable it on the Proxy Profiles page first, '
+                "or pick a different action.")
+    return None
 
 
 def action_label(action, profiles):
@@ -1426,13 +1450,14 @@ def explain_hostname(raw):
         else:
             shadowed.append(entry)
     action = winner["raw_action"] if winner else config["default_action"]
-    proxied = action != "direct" and action in profiles
+    disabled_profile = action in profiles and not profiles[action].get("enabled", True)
+    proxied = action != "direct" and action in profiles and not disabled_profile
     via_proxy_dns = bool(winner and proxied and config.get("resolve_via_proxy", True))
     notes = []
     if proxied:
         notes.append("QUIC (HTTP/3) to it is blocked, so apps fall back to TCP, which goes through the proxy.")
-        if not profiles[action].get("enabled", True):
-            notes.append(f'Its proxy profile "{action}" is disabled, so it isn\'t health-checked.')
+    elif disabled_profile:
+        notes.append(f'Its proxy profile "{action}" is disabled, so it goes direct for now.')
     elif action != "direct":
         notes.append(f'The action "{action}" names a profile that no longer exists, so it goes direct.')
     pinned = config.get("device_policies") or {}
@@ -1549,7 +1574,7 @@ def get_lookups_view():
             name = e["name"]
             rule = None if policy else match_rule(name, rules)
             action = policy or (rule["action"] if rule else default_action)
-            proxied = action != "direct" and action in profiles
+            proxied = action != "direct" and action in profiles and profiles[action].get("enabled", True)
             pattern, mode = suggest_rule_pattern(name)
             view["entries"].append({
                 "ip": ip,
@@ -2096,6 +2121,12 @@ def save_pattern_rule():
     if action not in valid_actions:
         return "Invalid action", 400
     problem = patterns_problem(patterns, mode)
+    if not problem:
+        # An existing rule that is off may keep a disabled profile (it was
+        # usually switched off together with it); anything that will be on may not.
+        existing = next((r for r in load_pattern_rules() if r["id"] == rule_id), None) if rule_id else None
+        if existing is None or existing.get("enabled", True):
+            problem = disabled_profile_error(action)
     if problem:
         # Keep what was typed: a new rule's form re-opens pre-filled with it.
         keep = None if rule_id else {"patterns": [p[:253] for p in patterns[:MAX_PATTERNS_PER_RULE]],
@@ -2118,6 +2149,11 @@ def delete_pattern_rule_route():
 @require_auth
 def toggle_pattern_rule_route():
     rule_id = request.form.get("id", "").strip()
+    current = next((r for r in load_pattern_rules() if r["id"] == rule_id), None)
+    if current is not None and not current.get("enabled", True):
+        error = disabled_profile_error(current["action"])
+        if error:
+            return form_error(error, "pattern-rules")
     if not toggle_pattern_rule(rule_id):
         return "Unknown pattern rule", 400
     rule = next((r for r in load_pattern_rules() if r["id"] == rule_id), None)

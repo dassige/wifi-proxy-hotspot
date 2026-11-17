@@ -31,6 +31,14 @@ def config(tmp_path, monkeypatch):
     return rules
 
 
+def test_disabled_profile_goes_direct_not_to_a_dead_port():
+    # The app leaves disabled profiles out of redsocks.conf, so nothing listens on their port.
+    profiles = {"Remote": {"local_port": 20000}, "AWS": {"local_port": 20001, "enabled": False}}
+    assert fw.resolve_target("Remote", profiles) == ("REDIRECT", 20000)
+    assert fw.resolve_target("AWS", profiles) == ("RETURN", None)
+    assert fw.resolve_target("gone", profiles) == ("RETURN", None)
+
+
 def chain(fake, table, name):
     return [c[c.index(name) + 1:] for c in fake.commands("iptables")
             if c[2] == table and "-A" in c and c[c.index("-A") + 1] == name]

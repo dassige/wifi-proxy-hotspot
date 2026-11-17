@@ -120,8 +120,11 @@ def load_device_policies():
 
 def resolve_target(action, profiles):
     # Fail-safe: "direct", or any action referencing a profile that no
-    # longer exists, is treated as RETURN rather than erroring out.
-    if action != "direct" and action in profiles:
+    # longer exists, is treated as RETURN rather than erroring out. So is a
+    # disabled profile: it has no redsocks block (the admin app leaves it out
+    # of redsocks.conf), so redirecting to its port would just refuse the
+    # connection.
+    if action != "direct" and action in profiles and profiles[action].get("enabled", True):
         return "REDIRECT", profiles[action]["local_port"]
     return "RETURN", None
 

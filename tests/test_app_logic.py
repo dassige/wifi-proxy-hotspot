@@ -174,7 +174,25 @@ def test_disabling_cascades_to_active_rules_only(app_module, profile_env):
     assert {r["id"]: r["enabled"] for r in profile_env["rebuilds"][0]["rules"]} == \
         {"r1": False, "r2": False, "r3": False, "r4": True}
     assert saved(profile_env)["Backup Proxy"]["enabled"] is False
-    assert profile_env["redsocks"] == []
+    # Each toggle rewrites redsocks.conf: a disabled profile has no block (2026-11-18).
+    assert len(profile_env["redsocks"]) == 2
+
+
+def test_redsocks_conf_leaves_out_disabled_profiles(app_module, monkeypatch, tmp_path):
+    conf, restarts = tmp_path / "redsocks.conf", []
+    monkeypatch.setattr(app_module, "REDSOCKS_CONF", str(conf))
+    monkeypatch.setattr(app_module.subprocess, "run", lambda cmd, **k: restarts.append(cmd))
+    profiles = copy.deepcopy(SAMPLE_PROFILES)
+    profiles["Backup Proxy"].update(enabled=False, ip="proxy.example.com")   # unresolvable at boot
+    app_module.write_redsocks_conf_all(profiles)
+    text = conf.read_text()
+    assert "local_port = 20000;" in text and "203.0.113.10" in text
+    assert "20001" not in text and "proxy.example.com" not in text
+    assert restarts and restarts[-1][-2:] == ["restart", "redsocks"]
+    for p in profiles.values():
+        p["enabled"] = False
+    app_module.write_redsocks_conf_all(profiles)
+    assert conf.read_text().count("redsocks {") == 0 and "base {" in conf.read_text()
 
 
 def test_reenabling_leaves_rules_off(app_module, profile_env):
@@ -246,6 +264,38 @@ def test_shared_cdn_rule_saves_with_heads_up(app_module, captured_render):
 def test_disabled_profile_cannot_be_default(app_module, captured_render):
     body, status = post(app_module, "save_default_action", "/default-action/save", {"default_action": "Backup Proxy"})
     assert status == 400 and "is disabled" in captured_render["message"]
+
+
+@pytest.fixture
+def rules_with_off_rule(app_module, monkeypatch):
+    cfg = {"bypass_cidr": "192.168.1.0/24", "default_action": "direct", "rules": [
+        {"id": "on1", "pattern": "a.it", "mode": "match", "action": "Remote Proxy", "enabled": True},
+        {"id": "off1", "pattern": "b.it", "mode": "match", "action": "Backup Proxy", "enabled": False}]}
+    toggled = []
+    monkeypatch.setattr(app_module, "load_pattern_config", lambda: cfg)
+    monkeypatch.setattr(app_module, "toggle_pattern_rule", lambda rid: toggled.append(rid) or True)
+    return toggled
+
+
+def test_rules_that_would_be_on_cannot_use_a_disabled_profile(app_module, captured_render, rules_with_off_rule):
+    # New rule (starts enabled): refused, input kept.
+    body, status = post(app_module, "save_pattern_rule", "/pattern-rule/save",
+                        {"pattern": "c.it", "mode": "match", "action": "Backup Proxy"})
+    assert status == 400 and "is disabled" in captured_render["message"]
+    assert captured_render["prefill"]["patterns"] == ["c.it"]
+    # Pointing an enabled rule at it: refused.
+    body, status = post(app_module, "save_pattern_rule", "/pattern-rule/save",
+                        {"id": "on1", "pattern": "a.it", "mode": "match", "action": "Backup Proxy"})
+    assert status == 400 and captured_render["edit"] == "on1"
+    # Editing a rule that is off (switched off with the profile): allowed.
+    assert post(app_module, "save_pattern_rule", "/pattern-rule/save",
+                {"id": "off1", "pattern": "b.it", "mode": "match", "action": "Backup Proxy"}) == "PAGE"
+    # Switching that rule on: refused, nothing toggled.
+    body, status = post(app_module, "toggle_pattern_rule_route", "/pattern-rule/toggle", {"id": "off1"})
+    assert status == 400 and "is disabled" in captured_render["message"] and rules_with_off_rule == []
+    # Switching an enabled rule off is always fine.
+    post(app_module, "toggle_pattern_rule_route", "/pattern-rule/toggle", {"id": "on1"})
+    assert rules_with_off_rule == ["on1"]
 
 
 @pytest.mark.parametrize("view,path,data,page", [

@@ -204,7 +204,9 @@ def load_rules():
         profiles = load_profiles()
         needed = {}
         if data.get("resolve_via_proxy", True):
-            needed = {r["action"]: profiles[r["action"]] for r in rules if r["action"] in profiles}
+            # Not through a disabled profile: such a rule goes direct (see the rebuild helper).
+            needed = {r["action"]: profiles[r["action"]] for r in rules
+                      if r["action"] in profiles and profiles[r["action"]].get("enabled", True)}
         try:
             _doh.sync(needed)
         except Exception:

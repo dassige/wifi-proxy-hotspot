@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.22.3] - 2026/11/18
+
+- Refactor proxy profile handling and update documentation
+
+- Updated the logic for handling disabled proxy profiles to ensure they are excluded from redsocks configuration, preventing routing to non-existent ports.
+- Enhanced error messages and validation to inform users when attempting to use disabled profiles in routing rules.
+- Improved comments and documentation in the codebase for clarity on the behavior of disabled profiles.
+- Updated the Wi-Fi Proxy Hotspot user guide to reflect version changes and clarify functionality related to proxy profiles and alerts.
+- Added tests to verify that disabled profiles do not interfere with active routing rules and that the application behaves correctly when profiles are toggled.
+
 ## [1.22.2] - 2026/11/18
 
 - Enhance firewall initialization checks and testing for dependency failures
